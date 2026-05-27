@@ -1,0 +1,20 @@
+{
+  "name": "linkman",
+  "version": "0.0.0",
+  "description": "",
+  "keywords": [],
+  "author": "Zeadust",
+  "license": "MIT",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "knip": "knip"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.16",
+    "@changesets/cli": "^2.31.0",
+    "@types/node": "^25.9.1",
+    "knip": "^6.14.2",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@11.4.0"
+}
