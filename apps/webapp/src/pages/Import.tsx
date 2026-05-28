@@ -14,7 +14,9 @@ import {
   Title,
   UnstyledButton,
 } from '@mantine/core'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+
+import { trpc } from '../utils/trpc-client'
 
 export function ImportPage() {
   const [file, setFile] = useState<File | null>(null)
@@ -25,6 +27,17 @@ export function ImportPage() {
   const [error, setError] = useState('')
 
   const resetRef = useRef<() => void>(null)
+
+  useEffect(() => {
+    trpc.userList
+      .query()
+      .then((users) => {
+        console.log('Users from server:', users)
+      })
+      .catch((err) => {
+        console.error('Failed to fetch users:', err)
+      })
+  }, [])
 
   const handleFileSelect = async (file: File | null) => {
     if (!file) return
@@ -127,7 +140,7 @@ export function ImportPage() {
               )}
             </Code>
             <Text c="dimmed" size="xs">
-              {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length}{' '}
+              {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length}
               characters
             </Text>
           </Stack>
