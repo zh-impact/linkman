@@ -11,8 +11,8 @@ export function Router() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route element={<RootLayout />}>
-          <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<RootLayout />}>
+          <Route index element={<HomePage />} />
           <Route path="/links" element={<LinksPage />} />
           <Route path="/import" element={<ImportPage />} />
           <Route path="/dedup" element={<DedupPage />} />
