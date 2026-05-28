@@ -1,0 +1,28 @@
+{
+  "name": "@linkman/service",
+  "version": "0.0.0",
+  "description": "",
+  "keywords": [],
+  "author": "Zeadust",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "drizzle-kit": "drizzle-kit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@libsql/client": "^0.17.3",
+    "@trpc/server": "^11.17.0",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "fastify": "^5.8.5",
+    "uuid": "^14.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "drizzle-kit": "^0.31.10",
+    "tsx": "^4.22.3"
+  }
+}
