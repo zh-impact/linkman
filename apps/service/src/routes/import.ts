@@ -29,7 +29,7 @@ export const importRouter = router({
       } = opts
 
       const jobId = uuidv4()
-      insertImportJob({
+      await insertImportJob({
         id: jobId,
         type: type,
         sourceContent: content,
@@ -47,7 +47,7 @@ export const importRouter = router({
           const parsed = JSON.parse(content)
           urls = Array.isArray(parsed) ? parsed.map(String) : []
         } catch {
-          updateImportJob(jobId, { status: 'failed', errorCount: 1 })
+          await updateImportJob(jobId, { status: 'failed', errorCount: 1 })
           // throw createError({ statusCode: 400, statusMessage: 'Invalid JSON content' })
         }
       } else {
@@ -60,7 +60,7 @@ export const importRouter = router({
       const { valid, invalid } = validateUrls(urls)
 
       if (invalid.length > 0) {
-        updateImportJob(jobId, { errorCount: invalid.length })
+        await updateImportJob(jobId, { errorCount: invalid.length })
       }
 
       let importedCount = 0
@@ -99,7 +99,7 @@ export const importRouter = router({
 
           const domain = extractDomain(originalUrl)
 
-          insertLink({
+          await insertLink({
             id: uuidv4(),
             originalUrl,
             normalizedUrl,
@@ -117,7 +117,7 @@ export const importRouter = router({
         }
       }
 
-      updateImportJob(jobId, {
+      await updateImportJob(jobId, {
         status: 'completed',
         importedCount,
         duplicateCount,

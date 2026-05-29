@@ -14,7 +14,7 @@ export function RootLayout() {
         navbar={{
           width: 300,
           breakpoint: 'sm',
-          collapsed: { mobile: !opened },
+          collapsed: { desktop: true, mobile: !opened },
         }}
       >
         <AppShell.Header>

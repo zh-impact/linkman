@@ -3,27 +3,27 @@ import { db } from './client'
 import { importJobs, linksTable, operations, snapshots, testJobs, testResults } from './schema'
 
 // Link queries
-export function insertLink(data: typeof linksTable.$inferInsert) {
+export async function insertLink(data: typeof linksTable.$inferInsert) {
   return db.insert(linksTable).values(data).run()
 }
 
-export function updateLink(id: string, data: Partial<typeof linksTable.$inferInsert>) {
+export async function updateLink(id: string, data: Partial<typeof linksTable.$inferInsert>) {
   return db.update(linksTable).set(data).where(eq(linksTable.id, id)).run()
 }
 
-export function deleteLink(id: string) {
+export async function deleteLink(id: string) {
   return db.delete(linksTable).where(eq(linksTable.id, id)).run()
 }
 
-export function getLinkById(id: string) {
+export async function getLinkById(id: string) {
   return db.select().from(linksTable).where(eq(linksTable.id, id)).get()
 }
 
-export function getAllLinks() {
+export async function getAllLinks() {
   return db.select().from(linksTable).all()
 }
 
-export function getLinksByStatus(status: (typeof linksTable.status.enumValues)[number]) {
+export async function getLinksByStatus(status: (typeof linksTable.status.enumValues)[number]) {
   return db
     .select()
     .from(linksTable)
@@ -32,7 +32,7 @@ export function getLinksByStatus(status: (typeof linksTable.status.enumValues)[n
     .all()
 }
 
-export function getLinksByIds(ids: string[]) {
+export async function getLinksByIds(ids: string[]) {
   return db
     .select()
     .from(linksTable)
@@ -41,7 +41,7 @@ export function getLinksByIds(ids: string[]) {
     .all()
 }
 
-export function getLinksPaginated(limit: number, offset: number) {
+export async function getLinksPaginated(limit: number, offset: number) {
   return db
     .select()
     .from(linksTable)
@@ -51,7 +51,7 @@ export function getLinksPaginated(limit: number, offset: number) {
     .all()
 }
 
-export function getLinksByStatusPaginated(status: string, limit: number, offset: number) {
+export async function getLinksByStatusPaginated(status: string, limit: number, offset: number) {
   return db
     .select()
     .from(linksTable)
@@ -62,7 +62,7 @@ export function getLinksByStatusPaginated(status: string, limit: number, offset:
     .all()
 }
 
-export function getLinksCountByStatus(status: string) {
+export async function getLinksCountByStatus(status: string) {
   return db
     .select({ count: sql<number>`count(*)` })
     .from(linksTable)
@@ -70,7 +70,7 @@ export function getLinksCountByStatus(status: string) {
     .get()
 }
 
-export function getLinksCount() {
+export async function getLinksCount() {
   return db.select({ count: sql<number>`count(*)` }).from(linksTable).get()
 }
 
@@ -80,7 +80,7 @@ export async function getAllLinkIds() {
 }
 
 // Search links with pagination (optionally filtered by status first)
-export function searchLinksPaginated(
+export async function searchLinksPaginated(
   query: string,
   status: string | null,
   limit: number,
@@ -121,7 +121,7 @@ export function searchLinksPaginated(
     .all()
 }
 
-export function searchLinksCount(query: string, status: string | null) {
+export async function searchLinksCount(query: string, status: string | null) {
   const searchTerm = `%${query}%`
   const conditions = or(
     like(linksTable.originalUrl, searchTerm),
@@ -148,46 +148,46 @@ export function searchLinksCount(query: string, status: string | null) {
 }
 
 // TestResult queries
-export function insertTestResult(data: typeof testResults.$inferInsert) {
+export async function insertTestResult(data: typeof testResults.$inferInsert) {
   return db.insert(testResults).values(data).run()
 }
 
-export function getTestResultsByLinkId(linkId: string) {
+export async function getTestResultsByLinkId(linkId: string) {
   return db.select().from(testResults).where(eq(testResults.linkId, linkId)).all()
 }
 
 // ImportJob queries
-export function insertImportJob(data: typeof importJobs.$inferInsert) {
+export async function insertImportJob(data: typeof importJobs.$inferInsert) {
   return db.insert(importJobs).values(data).run()
 }
 
-export function updateImportJob(id: string, data: Partial<typeof importJobs.$inferInsert>) {
+export async function updateImportJob(id: string, data: Partial<typeof importJobs.$inferInsert>) {
   return db.update(importJobs).set(data).where(eq(importJobs.id, id)).run()
 }
 
-export function getImportJobById(id: string) {
+export async function getImportJobById(id: string) {
   return db.select().from(importJobs).where(eq(importJobs.id, id)).get()
 }
 
 // TestJob queries
-export function insertTestJob(data: typeof testJobs.$inferInsert) {
+export async function insertTestJob(data: typeof testJobs.$inferInsert) {
   return db.insert(testJobs).values(data).run()
 }
 
-export function updateTestJob(id: string, data: Partial<typeof testJobs.$inferInsert>) {
+export async function updateTestJob(id: string, data: Partial<typeof testJobs.$inferInsert>) {
   return db.update(testJobs).set(data).where(eq(testJobs.id, id)).run()
 }
 
-export function getTestJobById(id: string) {
+export async function getTestJobById(id: string) {
   return db.select().from(testJobs).where(eq(testJobs.id, id)).get()
 }
 
 // Operation queries
-export function insertOperation(data: typeof operations.$inferInsert) {
+export async function insertOperation(data: typeof operations.$inferInsert) {
   return db.insert(operations).values(data).run()
 }
 
-export function getOperations(limit = 50, offset = 0) {
+export async function getOperations(limit = 50, offset = 0) {
   return db
     .select()
     .from(operations)
@@ -197,28 +197,28 @@ export function getOperations(limit = 50, offset = 0) {
     .all()
 }
 
-export function getOperationById(id: string) {
+export async function getOperationById(id: string) {
   return db.select().from(operations).where(eq(operations.id, id)).get()
 }
 
-export function deleteOperation(id: string) {
+export async function deleteOperation(id: string) {
   return db.delete(operations).where(eq(operations.id, id)).run()
 }
 
-export function deleteAllOperations() {
+export async function deleteAllOperations() {
   return db.delete(operations).run()
 }
 
 // Snapshot queries
-export function insertSnapshot(data: typeof snapshots.$inferInsert) {
+export async function insertSnapshot(data: typeof snapshots.$inferInsert) {
   return db.insert(snapshots).values(data).run()
 }
 
-export function getLatestSnapshot() {
+export async function getLatestSnapshot() {
   return db.select().from(snapshots).orderBy(desc(snapshots.createdAt)).limit(1).get()
 }
 
-export function getSnapshotBeforeOperation(operationId: string) {
+export async function getSnapshotBeforeOperation(operationId: string) {
   return db
     .select()
     .from(snapshots)

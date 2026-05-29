@@ -14,7 +14,7 @@ import {
   Title,
   UnstyledButton,
 } from '@mantine/core'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { trpc } from '../utils/trpc-client'
 
@@ -23,21 +23,13 @@ export function ImportPage() {
   const [fileContent, setFileContent] = useState('')
   const [fileType, setFileType] = useState<'TXT' | 'JSON'>('TXT')
   const [isImporting, setIsImporting] = useState(false)
-  const [result, setResult] = useState<{ importedCount: number; invalid: string[] } | null>(null)
+  const [result, setResult] = useState<{
+    importedCount: number
+    invalid: string[]
+  } | null>(null)
   const [error, setError] = useState('')
 
   const resetRef = useRef<() => void>(null)
-
-  useEffect(() => {
-    trpc.userList
-      .query()
-      .then((users) => {
-        console.log('Users from server:', users)
-      })
-      .catch((err) => {
-        console.error('Failed to fetch users:', err)
-      })
-  }, [])
 
   const handleFileSelect = async (file: File | null) => {
     if (!file) return
@@ -71,17 +63,37 @@ export function ImportPage() {
       setFileContent(text)
       const trimmed = text.trim()
       if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        setFileType('json')
+        setFileType('JSON')
       } else {
-        setFileType('txt')
+        setFileType('TXT')
       }
     } catch {
       setError('Failed to read from clipboard')
     }
   }
 
+  const handleImport = async () => {
+    if (!fileContent) return
+    setIsImporting(true)
+    setError('')
+    setResult(null)
+
+    try {
+      const res = await trpc.import.create.mutate({
+        type: fileType,
+        content: fileContent,
+        strategy: 'normalized',
+      })
+      setResult({ importedCount: res.importedCount, invalid: res.invalid })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   return (
-    <Container strategy="grid" size="md" styles={{ root: { gap: 'var(--mantine-spacing-xs)' } }}>
+    <Container strategy="grid" size="sm" styles={{ root: { gap: 'var(--mantine-spacing-xs)' } }}>
       <Box h={50}>
         <Title order={2}>Import Links</Title>
       </Box>
@@ -140,19 +152,25 @@ export function ImportPage() {
               )}
             </Code>
             <Text c="dimmed" size="xs">
-              {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length}
+              {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length}{' '}
               characters
             </Text>
           </Stack>
         </Card>
       )}
 
-      <Button disabled={isImporting || !fileContent}>Import</Button>
+      <Button loading={isImporting} disabled={!fileContent} onClick={handleImport}>
+        Import
+      </Button>
 
-      {error && <Alert title="Import Failed">{error}</Alert>}
+      {error && (
+        <Alert color="red" title="Import Failed">
+          {error}
+        </Alert>
+      )}
 
       {result && (
-        <Alert title="Import Successful!">
+        <Alert color="green" title="Import Successful!">
           <div>
             <p>Imported: {result.importedCount} links</p>
             {result.invalid.length > 0 && <p>Invalid: {result.invalid.length}</p>}
