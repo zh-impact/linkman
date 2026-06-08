@@ -51,7 +51,21 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 type SortField = 'domain' | 'status' | 'source' | 'createdAt'
 type SortDir = 'asc' | 'desc'
 
-const LINK_FIELDS = ['id', 'originalUrl', 'normalizedUrl', 'domain', 'title', 'source', 'status', 'tags', 'isInternal', 'duplicateOf', 'similarityGroup', 'createdAt', 'updatedAt'] as const
+const LINK_FIELDS = [
+  'id',
+  'originalUrl',
+  'normalizedUrl',
+  'domain',
+  'title',
+  'source',
+  'status',
+  'tags',
+  'isInternal',
+  'duplicateOf',
+  'similarityGroup',
+  'createdAt',
+  'updatedAt',
+] as const
 
 interface LinkItem {
   id: string
@@ -96,13 +110,15 @@ export function LinksPage() {
         status: status || undefined,
         search: search || undefined,
       })
-      setLinks((result.links as LinkItem[]).map((link) => {
-        const item: LinkItem = { ...link }
-        for (const key of LINK_FIELDS) {
-          if (!(key in item)) item[key] = ''
-        }
-        return item
-      }))
+      setLinks(
+        (result.links as LinkItem[]).map((link) => {
+          const item: LinkItem = { ...link }
+          for (const key of LINK_FIELDS) {
+            if (!(key in item)) item[key] = ''
+          }
+          return item
+        }),
+      )
       setTotal(result.total)
     } finally {
       setLoading(false)
@@ -214,10 +230,7 @@ export function LinksPage() {
   }
 
   const SortableTh = ({ field, label }: { field: SortField; label: string }) => (
-    <Table.Th
-      style={{ cursor: 'pointer', userSelect: 'none' }}
-      onClick={() => handleSort(field)}
-    >
+    <Table.Th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort(field)}>
       <Group gap={4} wrap="nowrap">
         <Text size="xs" fw={600} span>
           {label}
@@ -271,11 +284,21 @@ export function LinksPage() {
               本页全选
             </Badge>
             {totalPages > 1 && (
-              <Badge size="xs" variant="light" style={{ cursor: 'pointer' }} onClick={selectAllPages}>
+              <Badge
+                size="xs"
+                variant="light"
+                style={{ cursor: 'pointer' }}
+                onClick={selectAllPages}
+              >
                 All Pages
               </Badge>
             )}
-            <Badge size="xs" variant="light" style={{ cursor: 'pointer' }} onClick={invertSelection}>
+            <Badge
+              size="xs"
+              variant="light"
+              style={{ cursor: 'pointer' }}
+              onClick={invertSelection}
+            >
               Invert
             </Badge>
             <Badge size="xs" variant="light" style={{ cursor: 'pointer' }} onClick={selectNone}>
@@ -314,7 +337,12 @@ export function LinksPage() {
                     <Button size="xs" onClick={handleBatchTag} disabled={isTagging}>
                       {isTagging ? 'Adding...' : 'Add'}
                     </Button>
-                    <Button size="xs" variant="subtle" onClick={() => setShowTagInput(false)} disabled={isTagging}>
+                    <Button
+                      size="xs"
+                      variant="subtle"
+                      onClick={() => setShowTagInput(false)}
+                      disabled={isTagging}
+                    >
                       Cancel
                     </Button>
                   </Group>
@@ -386,7 +414,9 @@ export function LinksPage() {
                         {(page - 1) * PAGE_SIZE + i + 1}
                       </Text>
                     </Table.Td>
-                    <Table.Td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <Table.Td
+                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
                       <a
                         href={link.originalUrl}
                         target="_blank"
@@ -405,7 +435,9 @@ export function LinksPage() {
                         {link.originalUrl}
                       </a>
                     </Table.Td>
-                    <Table.Td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <Table.Td
+                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    >
                       <Text size="xs">{link.domain}</Text>
                     </Table.Td>
                     <Table.Td>

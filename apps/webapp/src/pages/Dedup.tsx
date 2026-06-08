@@ -70,7 +70,7 @@ export function DedupPage() {
   }
 
   return (
-    <Container size="md">
+    <Container strategy="grid" size="md">
       <Title order={2} mb="md">
         Deduplicate Links
       </Title>
@@ -162,7 +162,8 @@ export function DedupPage() {
                       Keep: {group.keepId.slice(0, 8)}
                     </Badge>
                     <Badge color="orange" size="sm">
-                      {group.duplicateIds.length} duplicate{group.duplicateIds.length > 1 ? 's' : ''}
+                      {group.duplicateIds.length} duplicate
+                      {group.duplicateIds.length > 1 ? 's' : ''}
                     </Badge>
                   </Group>
                 </Card>
