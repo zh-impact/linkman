@@ -3,17 +3,65 @@ import { z } from 'zod'
 import { db } from '../lib/db/client'
 import { linksTable } from '../lib/db/schema'
 import { getAllLinks } from '../lib/db/queries'
-import { captureBeforeState, diffLinks, logOperation } from '../lib/log'
+import { logOperation } from '../lib/log'
 import { normalizeUrl } from '../lib/url/normalize'
 import { publicProcedure, router } from '../trpc'
 
-const DEFAULT_NORMALIZE_CONFIG = {
+const defaultNormalizeConfig = {
   forceHttps: false,
-  removeWww: true,
+  removeWww: false,
   removeTrailingSlash: true,
   removeDefaultPort: true,
-  sortQueryParams: false,
+  sortQueryParams: true,
   removeFragment: true,
+}
+
+const normalizeConfigSchema = z.object({
+  forceHttps: z.boolean(),
+  removeWww: z.boolean(),
+  removeTrailingSlash: z.boolean(),
+  removeDefaultPort: z.boolean(),
+  sortQueryParams: z.boolean(),
+  removeFragment: z.boolean(),
+}).default(defaultNormalizeConfig)
+
+function getNormalizeUrl(strategy: string, normalizeConfig: z.infer<typeof normalizeConfigSchema>) {
+  return (url: string): string => {
+    if (strategy === 'strict') return url
+    if (strategy === 'normalized') return normalizeUrl(url, normalizeConfig)
+    // smart: only www and trailing slash
+    return normalizeUrl(url, {
+      forceHttps: false,
+      removeWww: true,
+      removeTrailingSlash: true,
+      removeDefaultPort: false,
+      sortQueryParams: false,
+      removeFragment: false,
+    })
+  }
+}
+
+function findDuplicateGroups(allLinks: Awaited<ReturnType<typeof getAllLinks>>, normalize: (url: string) => string) {
+  const normalizedMap = new Map<string, string[]>()
+  for (const link of allLinks) {
+    const normalizedUrl = normalize(link.originalUrl)
+    if (!normalizedMap.has(normalizedUrl)) {
+      normalizedMap.set(normalizedUrl, [])
+    }
+    normalizedMap.get(normalizedUrl)!.push(link.id)
+  }
+
+  const groups: Array<{ keepId: string; duplicateIds: string[] }> = []
+  let duplicateCount = 0
+
+  for (const [, ids] of normalizedMap) {
+    if (ids.length <= 1) continue
+    const [keepId, ...duplicateIds] = ids
+    groups.push({ keepId, duplicateIds })
+    duplicateCount += duplicateIds.length
+  }
+
+  return { groups, duplicateCount }
 }
 
 export const deduplicateRouter = router({
@@ -22,54 +70,21 @@ export const deduplicateRouter = router({
       z.object({
         strategy: z.enum(['strict', 'normalized', 'smart']).default('normalized'),
         sort: z.enum(['original', 'alphabetical', 'domain']).default('original'),
+        normalizeConfig: normalizeConfigSchema,
       }),
     )
     .query(async ({ input }) => {
-      const { strategy, sort } = input
+      const { strategy, sort, normalizeConfig } = input
       const allLinks = await getAllLinks()
 
-      const normalizedMap = new Map<string, string[]>()
-      const sortedLinks = [...allLinks]
-
       if (sort === 'alphabetical') {
-        sortedLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))
+        allLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))
       } else if (sort === 'domain') {
-        sortedLinks.sort((a, b) => a.domain.localeCompare(b.domain))
+        allLinks.sort((a, b) => a.domain.localeCompare(b.domain))
       }
 
-      for (const link of sortedLinks) {
-        let normalizedUrl: string
-
-        if (strategy === 'strict') {
-          normalizedUrl = link.originalUrl
-        } else if (strategy === 'normalized') {
-          normalizedUrl = normalizeUrl(link.originalUrl, DEFAULT_NORMALIZE_CONFIG)
-        } else {
-          normalizedUrl = normalizeUrl(link.originalUrl, {
-            forceHttps: false,
-            removeWww: true,
-            removeTrailingSlash: true,
-            removeDefaultPort: false,
-            sortQueryParams: false,
-            removeFragment: false,
-          })
-        }
-
-        if (!normalizedMap.has(normalizedUrl)) {
-          normalizedMap.set(normalizedUrl, [])
-        }
-        normalizedMap.get(normalizedUrl)!.push(link.id)
-      }
-
-      const groups: Array<{ keepId: string; duplicateIds: string[] }> = []
-      let duplicateCount = 0
-
-      for (const [, ids] of normalizedMap) {
-        if (ids.length <= 1) continue
-        const [keepId, ...duplicateIds] = ids
-        groups.push({ keepId, duplicateIds })
-        duplicateCount += duplicateIds.length
-      }
+      const normalize = getNormalizeUrl(strategy, normalizeConfig)
+      const { groups, duplicateCount } = findDuplicateGroups(allLinks, normalize)
 
       return {
         duplicateCount,
@@ -83,56 +98,21 @@ export const deduplicateRouter = router({
       z.object({
         strategy: z.enum(['strict', 'normalized', 'smart']).default('normalized'),
         sort: z.enum(['original', 'alphabetical', 'domain']).default('original'),
+        normalizeConfig: normalizeConfigSchema,
       }),
     )
     .mutation(async ({ input }) => {
-      const { strategy, sort } = input
+      const { strategy, sort, normalizeConfig } = input
       const allLinks = await getAllLinks()
 
-      const normalizedMap = new Map<string, string[]>()
-      const sortedLinks = [...allLinks]
-
       if (sort === 'alphabetical') {
-        sortedLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))
+        allLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))
       } else if (sort === 'domain') {
-        sortedLinks.sort((a, b) => a.domain.localeCompare(b.domain))
+        allLinks.sort((a, b) => a.domain.localeCompare(b.domain))
       }
 
-      for (const link of sortedLinks) {
-        let normalizedUrl: string
-
-        if (strategy === 'strict') {
-          normalizedUrl = link.originalUrl
-        } else if (strategy === 'normalized') {
-          normalizedUrl = normalizeUrl(link.originalUrl, DEFAULT_NORMALIZE_CONFIG)
-        } else {
-          normalizedUrl = normalizeUrl(link.originalUrl, {
-            forceHttps: false,
-            removeWww: true,
-            removeTrailingSlash: true,
-            removeDefaultPort: false,
-            sortQueryParams: false,
-            removeFragment: false,
-          })
-        }
-
-        if (!normalizedMap.has(normalizedUrl)) {
-          normalizedMap.set(normalizedUrl, [])
-        }
-        normalizedMap.get(normalizedUrl)!.push(link.id)
-      }
-
-      const groups: Array<{ keepId: string; duplicateIds: string[] }> = []
-      let duplicateCount = 0
-
-      for (const [, ids] of normalizedMap) {
-        if (ids.length <= 1) continue
-        const [keepId, ...duplicateIds] = ids
-        groups.push({ keepId, duplicateIds })
-        duplicateCount += duplicateIds.length
-      }
-
-      const before = await captureBeforeState()
+      const normalize = getNormalizeUrl(strategy, normalizeConfig)
+      const { groups, duplicateCount } = findDuplicateGroups(allLinks, normalize)
 
       for (const group of groups) {
         for (const dupId of group.duplicateIds) {
@@ -144,30 +124,23 @@ export const deduplicateRouter = router({
         }
       }
 
-      const linksAfter = await getAllLinks()
-      const changes = diffLinks(
-        before.linksBefore as Array<{ id: string; [key: string]: unknown }>,
-        linksAfter as Array<{ id: string; [key: string]: unknown }>,
-      )
-
-      const operationId = await logOperation(
+      await logOperation(
         {
           type: 'deduplicate',
-          changes,
+          changes: { added: [], removed: [], modified: groups.flatMap((g) => g.duplicateIds.map((id) => ({ id, changes: {} }))) },
           stats: {
             inputCount: allLinks.length,
-            outputCount: linksAfter.length,
+            outputCount: allLinks.length,
             duplicateCount,
             errorCount: 0,
           },
         },
-        before.snapshotHash.hash,
+        '',
       )
 
       return {
         duplicateCount,
-        remainingCount: linksAfter.length,
-        operationId,
+        remainingCount: allLinks.length,
       }
     }),
 })

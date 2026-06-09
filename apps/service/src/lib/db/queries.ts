@@ -7,12 +7,22 @@ export async function insertLink(data: typeof linksTable.$inferInsert) {
   return db.insert(linksTable).values(data).run()
 }
 
+export async function insertLinks(data: (typeof linksTable.$inferInsert)[]) {
+  if (data.length === 0) return
+  return db.insert(linksTable).values(data).run()
+}
+
 export async function updateLink(id: string, data: Partial<typeof linksTable.$inferInsert>) {
   return db.update(linksTable).set(data).where(eq(linksTable.id, id)).run()
 }
 
 export async function deleteLink(id: string) {
   return db.delete(linksTable).where(eq(linksTable.id, id)).run()
+}
+
+export async function deleteLinksByIds(ids: string[]) {
+  if (ids.length === 0) return
+  return db.delete(linksTable).where(inArray(linksTable.id, ids)).run()
 }
 
 export async function getLinkById(id: string) {
@@ -207,6 +217,10 @@ export async function deleteOperation(id: string) {
 
 export async function deleteAllOperations() {
   return db.delete(operations).run()
+}
+
+export async function getOperationsCount() {
+  return db.select({ count: sql<number>`count(*)` }).from(operations).get()
 }
 
 // Snapshot queries

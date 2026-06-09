@@ -31,7 +31,7 @@ export function RootLayout() {
               <Group gap="xs" wrap="nowrap">
                 <Burger opened={opened} onClick={toggle} hiddenFrom="sm" size="sm" />
                 <Text fw={700}>LinkMan</Text>
-                <Group ml="xl" gap={0} visibleFrom="sm">
+                <Group ml="xl" gap="xs" visibleFrom="sm">
                   <UnstyledButton component={NavLink} to="/" className={classes.control}>
                     Dashboard
                   </UnstyledButton>

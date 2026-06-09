@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { deleteAllOperations, deleteOperation, getOperationById, getOperations } from '../lib/db/queries'
+import { deleteAllOperations, deleteOperation, getOperationById, getOperations, getOperationsCount } from '../lib/db/queries'
 import { rollbackToOperation } from '../lib/log'
 import { publicProcedure, router } from '../trpc'
 
@@ -12,15 +12,21 @@ export const operationsRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      const operations = await getOperations(input.limit, input.offset)
-      return operations.map((op) => ({
-        ...op,
-        changesAdded: JSON.parse(op.changesAdded),
-        changesRemoved: JSON.parse(op.changesRemoved),
-        changesModified: JSON.parse(op.changesModified),
-        errors: JSON.parse(op.errors),
-        warnings: JSON.parse(op.warnings),
-      }))
+      const [ops, countResult] = await Promise.all([
+        getOperations(input.limit, input.offset),
+        getOperationsCount(),
+      ])
+      return {
+        operations: ops.map((op) => ({
+          ...op,
+          changesAdded: JSON.parse(op.changesAdded),
+          changesRemoved: JSON.parse(op.changesRemoved),
+          changesModified: JSON.parse(op.changesModified),
+          errors: JSON.parse(op.errors),
+          warnings: JSON.parse(op.warnings),
+        })),
+        total: countResult?.count ?? 0,
+      }
     }),
 
   getById: publicProcedure.input(z.string()).query(async ({ input: id }) => {

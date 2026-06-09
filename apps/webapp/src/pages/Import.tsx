@@ -86,6 +86,17 @@ export function ImportPage() {
       })
       setResult({ importedCount: res.importedCount, invalid: res.invalid })
     } catch (err) {
+      console.error('[import] full error:', err)
+      if (err instanceof Error) {
+        console.error('[import] error name:', err.name)
+        console.error('[import] error message:', err.message)
+        console.error('[import] error stack:', err.stack)
+        // Try to extract tRPC details
+        const anyErr = err as unknown as Record<string, unknown>
+        if (anyErr.cause) console.error('[import] cause:', JSON.stringify(anyErr.cause, null, 2))
+        if (anyErr.data) console.error('[import] data:', JSON.stringify(anyErr.data, null, 2))
+        if (anyErr.shape) console.error('[import] shape:', JSON.stringify(anyErr.shape, null, 2))
+      }
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {
       setIsImporting(false)

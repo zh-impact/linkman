@@ -6,8 +6,10 @@ import {
   Card,
   Checkbox,
   Container,
+  Divider,
   Group,
   Loader,
+  Menu,
   Pagination,
   Select,
   Stack,
@@ -18,6 +20,7 @@ import {
 } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
 import { trpc } from '../utils/trpc-client'
+import { useConfirm } from '../utils/use-confirm'
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All' },
@@ -50,6 +53,7 @@ const statusConfig: Record<string, { label: string; color: string }> = {
 
 type SortField = 'domain' | 'status' | 'source' | 'createdAt'
 type SortDir = 'asc' | 'desc'
+type ViewMode = 'table' | 'grouped'
 
 const LINK_FIELDS = [
   'id',
@@ -79,6 +83,178 @@ interface LinkItem {
   [key: string]: unknown
 }
 
+// --- Grouped view helpers ---
+
+interface GroupData {
+  key: string
+  links: LinkItem[]
+}
+
+function groupLinks(links: LinkItem[]): GroupData[] {
+  const map = new Map<string, LinkItem[]>()
+  for (const link of links) {
+    const key = (link.similarityGroup as string) || link.domain
+    const existing = map.get(key)
+    if (existing) {
+      existing.push(link)
+    } else {
+      map.set(key, [link])
+    }
+  }
+  return Array.from(map.entries())
+    .map(([key, items]) => ({ key, links: items }))
+    .sort((a, b) => b.links.length - a.links.length)
+}
+
+function GroupCard({
+  group,
+  selectedIds,
+  toggleSelect,
+  onDelete,
+}: {
+  group: GroupData
+  selectedIds: Set<string>
+  toggleSelect: (id: string) => void
+  onDelete: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const allSelected = group.links.every((l) => selectedIds.has(l.id))
+
+  const toggleGroupSelect = () => {
+    if (allSelected) {
+      group.links.forEach((l) => {
+        if (selectedIds.has(l.id)) toggleSelect(l.id)
+      })
+    } else {
+      group.links.forEach((l) => {
+        if (!selectedIds.has(l.id)) toggleSelect(l.id)
+      })
+    }
+  }
+
+  const previewLinks = group.links.slice(0, 3)
+  const extraLinks = group.links.slice(3)
+
+  return (
+    <Card withBorder>
+      <Group gap="xs" p="xs">
+        <Checkbox checked={allSelected} onChange={toggleGroupSelect} />
+        <Text fw={600} size="sm" style={{ flex: 1 }}>
+          {group.key}
+        </Text>
+        <Badge variant="light" size="sm">
+          {group.links.length}
+        </Badge>
+        {extraLinks.length > 0 && (
+          <ActionIcon
+            size="sm"
+            variant="subtle"
+            onClick={() => setOpen(!open)}
+            title={open ? 'Collapse' : `${extraLinks.length} more...`}
+          >
+            {open ? '▲' : '▼'}
+          </ActionIcon>
+        )}
+      </Group>
+      <Divider />
+      {previewLinks.map((link) => (
+        <GroupItem
+          key={link.id}
+          link={link}
+          selected={selectedIds.has(link.id)}
+          onToggle={() => toggleSelect(link.id)}
+          onDelete={() => onDelete(link.id)}
+        />
+      ))}
+      {open &&
+        extraLinks.map((link) => (
+          <GroupItem
+            key={link.id}
+            link={link}
+            selected={selectedIds.has(link.id)}
+            onToggle={() => toggleSelect(link.id)}
+            onDelete={() => onDelete(link.id)}
+          />
+        ))}
+      {extraLinks.length > 0 && !open && (
+        <Button
+          variant="subtle"
+          size="xs"
+          fullWidth
+          onClick={() => setOpen(true)}
+          style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}
+        >
+          {extraLinks.length} more...
+        </Button>
+      )}
+      {open && extraLinks.length > 0 && (
+        <Button
+          variant="subtle"
+          size="xs"
+          fullWidth
+          onClick={() => setOpen(false)}
+          style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}
+        >
+          Collapse
+        </Button>
+      )}
+    </Card>
+  )
+}
+
+function GroupItem({
+  link,
+  selected,
+  onToggle,
+  onDelete,
+}: {
+  link: LinkItem
+  selected: boolean
+  onToggle: () => void
+  onDelete: () => void
+}) {
+  return (
+    <Group
+      gap="xs"
+      px="xs"
+      py={4}
+      bg={selected ? 'var(--mantine-color-blue-light)' : undefined}
+      style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}
+    >
+      <Checkbox checked={selected} onChange={onToggle} />
+      <a
+        href={link.originalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          flex: 1,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          color: 'var(--mantine-color-blue-6)',
+          textDecoration: 'none',
+          fontSize: 'var(--mantine-font-size-xs)',
+        }}
+        title={link.originalUrl}
+      >
+        {link.originalUrl}
+      </a>
+      <Badge
+        color={(statusConfig[link.status]?.color ?? 'gray') as string}
+        variant="light"
+        size="sm"
+      >
+        {statusConfig[link.status]?.label ?? link.status}
+      </Badge>
+      <ActionIcon size="xs" variant="subtle" color="red" onClick={onDelete} title="Delete">
+        ✕
+      </ActionIcon>
+    </Group>
+  )
+}
+
+// --- Main page ---
+
 export function LinksPage() {
   const [links, setLinks] = useState<LinkItem[]>([])
   const [total, setTotal] = useState(0)
@@ -87,6 +263,9 @@ export function LinksPage() {
   const [status, setStatus] = useState<string | undefined>(undefined)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+
+  // View mode
+  const [viewMode, setViewMode] = useState<ViewMode>('table')
 
   // Selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -100,6 +279,7 @@ export function LinksPage() {
   const [tagValue, setTagValue] = useState('')
   const [isDeleting, setIsDeleting] = useState(false)
   const [isTagging, setIsTagging] = useState(false)
+  const confirmDlg = useConfirm()
 
   const fetchLinks = useCallback(async () => {
     setLoading(true)
@@ -186,6 +366,9 @@ export function LinksPage() {
     return sortDir === 'asc' ? cmp : -cmp
   })
 
+  // Grouped data
+  const groupedLinks = groupLinks(sortedLinks)
+
   // Bulk operations
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) return
@@ -220,6 +403,11 @@ export function LinksPage() {
     }
   }
 
+  const handleDelete = async (id: string) => {
+    await trpc.links.delete.mutate(id)
+    fetchLinks()
+  }
+
   const parseTags = (tags: string): string[] => {
     try {
       const parsed = JSON.parse(tags)
@@ -244,13 +432,87 @@ export function LinksPage() {
     </Table.Th>
   )
 
-  return (
-    <Container strategy="grid" size="lg" styles={{ root: { gap: 'var(--mantine-spacing-xs)' } }}>
-      <Box h={50}>
-        <Title order={2}>Links</Title>
-      </Box>
+  const [exporting, setExporting] = useState(false)
 
-      <Group>
+  const handleExport = async (format: 'json' | 'csv', scope: 'all' | 'filtered' | 'selected') => {
+    setExporting(true)
+    try {
+      const input: { format: 'json' | 'csv'; status?: string; ids?: string[] } = { format }
+      if (scope === 'selected') {
+        input.ids = Array.from(selectedIds)
+      } else if (scope === 'filtered' && status) {
+        input.status = status
+      }
+      const res = await trpc.links.export.query(input)
+      const blob = new Blob([res.data], { type: format === 'csv' ? 'text/csv' : 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `links.${format}`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return (
+    <Container strategy="grid" size="lg">
+      {confirmDlg.modal}
+      <Group justify="space-between" mb="md">
+        <Group gap="md">
+          <Title order={2}>Links</Title>
+          <Text size="sm" c="dimmed">
+            {total} total
+          </Text>
+        </Group>
+        <Group gap={4}>
+          <Button
+            size="xs"
+            variant={viewMode === 'table' ? 'filled' : 'subtle'}
+            onClick={() => setViewMode('table')}
+          >
+            Table
+          </Button>
+          <Button
+            size="xs"
+            variant={viewMode === 'grouped' ? 'filled' : 'subtle'}
+            onClick={() => setViewMode('grouped')}
+          >
+            Grouped
+          </Button>
+          <Menu shadow="md" width={220}>
+            <Menu.Target>
+              <Button size="xs" variant="outline" loading={exporting}>
+                Export
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>Current View</Menu.Label>
+              <Menu.Item onClick={() => handleExport('csv', 'filtered')}>
+                Export as CSV
+              </Menu.Item>
+              <Menu.Item onClick={() => handleExport('json', 'filtered')}>
+                Export as JSON
+              </Menu.Item>
+              {selectedIds.size > 0 && (
+                <>
+                  <Menu.Divider />
+                  <Menu.Label>Selected ({selectedIds.size} items)</Menu.Label>
+                  <Menu.Item onClick={() => handleExport('csv', 'selected')}>
+                    Export selected as CSV
+                  </Menu.Item>
+                  <Menu.Item onClick={() => handleExport('json', 'selected')}>
+                    Export selected as JSON
+                  </Menu.Item>
+                </>
+              )}
+            </Menu.Dropdown>
+          </Menu>
+        </Group>
+      </Group>
+
+      <Group mb="md">
         <TextInput
           placeholder="Search URLs, domains, titles..."
           value={searchInput}
@@ -274,18 +536,18 @@ export function LinksPage() {
 
       {/* Bulk actions bar */}
       {links.length > 0 && (
-        <Card withBorder p="xs">
-          <Group gap="xs" wrap="wrap">
-            <Text size="xs" c="dimmed">
+        <Card withBorder p="sm" mb="md">
+          <Group gap="sm" wrap="wrap">
+            <Text size="sm" c="dimmed">
               Selected <strong>{selectedIds.size}</strong> / {total}
             </Text>
 
-            <Badge size="xs" variant="light" style={{ cursor: 'pointer' }} onClick={toggleAll}>
-              本页全选
+            <Badge size="sm" variant="light" style={{ cursor: 'pointer' }} onClick={toggleAll}>
+              All
             </Badge>
             {totalPages > 1 && (
               <Badge
-                size="xs"
+                size="sm"
                 variant="light"
                 style={{ cursor: 'pointer' }}
                 onClick={selectAllPages}
@@ -294,19 +556,19 @@ export function LinksPage() {
               </Badge>
             )}
             <Badge
-              size="xs"
+              size="sm"
               variant="light"
               style={{ cursor: 'pointer' }}
               onClick={invertSelection}
             >
               Invert
             </Badge>
-            <Badge size="xs" variant="light" style={{ cursor: 'pointer' }} onClick={selectNone}>
+            <Badge size="sm" variant="light" style={{ cursor: 'pointer' }} onClick={selectNone}>
               None
             </Badge>
 
             <Select
-              size="xs"
+              size="sm"
               placeholder="Filter by status"
               data={STATUS_OPTIONS.filter((o) => o.value)}
               w={150}
@@ -325,8 +587,8 @@ export function LinksPage() {
                 {showTagInput ? (
                   <Group gap={4}>
                     <TextInput
-                      size="xs"
-                      w={120}
+                      size="sm"
+                      w={140}
                       placeholder="Tag name"
                       value={tagValue}
                       onChange={(e) => setTagValue(e.currentTarget.value)}
@@ -334,11 +596,11 @@ export function LinksPage() {
                       autoFocus
                       disabled={isTagging}
                     />
-                    <Button size="xs" onClick={handleBatchTag} disabled={isTagging}>
+                    <Button size="sm" onClick={handleBatchTag} disabled={isTagging}>
                       {isTagging ? 'Adding...' : 'Add'}
                     </Button>
                     <Button
-                      size="xs"
+                      size="sm"
                       variant="subtle"
                       onClick={() => setShowTagInput(false)}
                       disabled={isTagging}
@@ -347,18 +609,22 @@ export function LinksPage() {
                     </Button>
                   </Group>
                 ) : (
-                  <Button size="xs" variant="outline" onClick={() => setShowTagInput(true)}>
+                  <Button size="sm" variant="outline" onClick={() => setShowTagInput(true)}>
                     Batch Tag
                   </Button>
                 )}
 
                 <Button
-                  size="xs"
+                  size="sm"
                   color="red"
-                  onClick={() => {
-                    if (confirm(`Delete ${selectedIds.size} selected links?`)) {
-                      handleBatchDelete()
-                    }
+                  onClick={async () => {
+                    const ok = await confirmDlg.confirm({
+                      title: 'Confirm Delete',
+                      message: `Delete ${selectedIds.size} selected links? This can be undone via rollback.`,
+                      confirmLabel: 'Delete',
+                      confirmColor: 'red',
+                    })
+                    if (ok) handleBatchDelete()
                   }}
                   loading={isDeleting}
                 >
@@ -370,123 +636,160 @@ export function LinksPage() {
         </Card>
       )}
 
-      <Text size="sm" c="dimmed" mb="xs">
-        {total} links found
-      </Text>
-
       {loading ? (
         <Loader />
-      ) : links.length === 0 ? (
-        <Text c="dimmed">No links found.</Text>
-      ) : (
+      ) : viewMode === 'table' ? (
         <Stack gap="md">
           <Box style={{ overflowX: 'auto' }}>
-            <Table striped highlightOnHover style={{ tableLayout: 'fixed', width: '100%' }}>
+            <Table
+              striped
+              highlightOnHover
+              style={{ tableLayout: 'fixed', width: '100%', minWidth: 900 }}
+            >
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th w={36}>
+                  <Table.Th w={40}>
                     <Checkbox checked={allSelected} onChange={toggleAll} />
                   </Table.Th>
-                  <Table.Th w={36}>#</Table.Th>
-                  <Table.Th style={{ width: '30%' }}>URL</Table.Th>
+                  <Table.Th w={40}>#</Table.Th>
+                  <Table.Th style={{ width: '35%' }}>URL</Table.Th>
                   <SortableTh field="domain" label="Domain" />
                   <SortableTh field="status" label="Status" />
                   <Table.Th>Tags</Table.Th>
                   <SortableTh field="source" label="Source" />
                   <SortableTh field="createdAt" label="Time" />
-                  <Table.Th w={70}>Actions</Table.Th>
+                  <Table.Th w={80}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {sortedLinks.map((link, i) => (
-                  <Table.Tr
-                    key={link.id}
-                    bg={selectedIds.has(link.id) ? 'var(--mantine-color-blue-light)' : undefined}
-                  >
-                    <Table.Td>
-                      <Checkbox
-                        checked={selectedIds.has(link.id)}
-                        onChange={() => toggleSelect(link.id)}
-                      />
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="xs" c="dimmed">
-                        {(page - 1) * PAGE_SIZE + i + 1}
+                {sortedLinks.length === 0 ? (
+                  <Table.Tr>
+                    <Table.Td colSpan={9}>
+                      <Text c="dimmed" ta="center" py="md">
+                        No links found.
                       </Text>
                     </Table.Td>
-                    <Table.Td
-                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  </Table.Tr>
+                ) : (
+                  sortedLinks.map((link, i) => (
+                    <Table.Tr
+                      key={link.id}
+                      bg={selectedIds.has(link.id) ? 'var(--mantine-color-blue-light)' : undefined}
+                      style={{ height: 48 }}
                     >
-                      <a
-                        href={link.originalUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <Table.Td>
+                        <Checkbox
+                          checked={selectedIds.has(link.id)}
+                          onChange={() => toggleSelect(link.id)}
+                        />
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">
+                          {(page - 1) * PAGE_SIZE + i + 1}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td
                         style={{
-                          display: 'block',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
-                          color: 'var(--mantine-color-blue-6)',
-                          textDecoration: 'none',
-                          fontSize: 'var(--mantine-font-size-xs)',
                         }}
-                        title={link.originalUrl}
                       >
-                        {link.originalUrl}
-                      </a>
-                    </Table.Td>
-                    <Table.Td
-                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                    >
-                      <Text size="xs">{link.domain}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge
-                        color={(statusConfig[link.status]?.color ?? 'gray') as string}
-                        variant="light"
-                        size="sm"
-                      >
-                        {statusConfig[link.status]?.label ?? link.status}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={4} wrap="wrap">
-                        {parseTags(link.tags).map((tag) => (
-                          <Badge key={tag} variant="default" size="sm">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </Group>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="xs" c="dimmed">
-                        {String(link.source).toUpperCase()}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="xs" c="dimmed">
-                        {new Date(link.createdAt.replace(' ', 'T') + 'Z').toLocaleString()}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <ActionIcon
-                        size="sm"
-                        variant="subtle"
-                        color="red"
-                        onClick={async () => {
-                          await trpc.links.delete.mutate(link.id)
-                          fetchLinks()
+                        <a
+                          href={link.originalUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            display: 'block',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            color: 'var(--mantine-color-blue-6)',
+                            textDecoration: 'none',
+                            fontSize: 'var(--mantine-font-size-xs)',
+                          }}
+                          title={link.originalUrl}
+                        >
+                          {link.originalUrl}
+                        </a>
+                      </Table.Td>
+                      <Table.Td
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                         }}
-                        title="Delete"
                       >
-                        ✕
-                      </ActionIcon>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
+                        <Text size="xs">{link.domain}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Badge
+                          color={(statusConfig[link.status]?.color ?? 'gray') as string}
+                          variant="light"
+                          size="sm"
+                        >
+                          {statusConfig[link.status]?.label ?? link.status}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4} wrap="wrap">
+                          {parseTags(link.tags).map((tag) => (
+                            <Badge key={tag} variant="default" size="sm">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">
+                          {String(link.source).toUpperCase()}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="dimmed">
+                          {new Date(link.createdAt.replace(' ', 'T') + 'Z').toLocaleString()}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <ActionIcon
+                          size="sm"
+                          variant="subtle"
+                          color="red"
+                          onClick={() => handleDelete(link.id)}
+                          title="Delete"
+                        >
+                          ✕
+                        </ActionIcon>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))
+                )}
               </Table.Tbody>
             </Table>
           </Box>
+
+          {totalPages > 1 && (
+            <Group justify="center">
+              <Pagination value={page} onChange={setPage} total={totalPages} />
+            </Group>
+          )}
+        </Stack>
+      ) : (
+        /* Grouped view */
+        <Stack gap="md">
+          {groupedLinks.length === 0 ? (
+            <Text c="dimmed">No groups.</Text>
+          ) : (
+            groupedLinks.map((group) => (
+              <GroupCard
+                key={group.key}
+                group={group}
+                selectedIds={selectedIds}
+                toggleSelect={toggleSelect}
+                onDelete={handleDelete}
+              />
+            ))
+          )}
 
           {totalPages > 1 && (
             <Group justify="center">

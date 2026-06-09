@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import {
-  deleteLink,
+  deleteLinksByIds,
   getAllLinkIds,
   getLinkById,
   getLinksByStatus,
@@ -13,6 +13,7 @@ import {
   searchLinksPaginated,
   updateLink,
 } from '../lib/db/queries'
+import { logOperation } from '../lib/log'
 import { publicProcedure, router } from '../trpc'
 
 const statusEnum = z.enum([
@@ -87,31 +88,34 @@ export const linksRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
-      // TODO: add operation logging (Phase 4)
       await updateLink(input.id, input.data)
       const updated = await getLinkById(input.id)
+      await logOperation(
+        { type: 'manual_tag', changes: { added: [], removed: [], modified: [{ id: input.id, changes: {} }] }, stats: { inputCount: 1, outputCount: 1, errorCount: 0 } },
+        '',
+      )
       return updated
     }),
 
   delete: publicProcedure.input(z.string()).mutation(async ({ input: id }) => {
-    // TODO: add operation logging (Phase 4)
-    await deleteLink(id)
+    await deleteLinksByIds([id])
+    await logOperation(
+      { type: 'manual_delete', changes: { added: [], removed: [id], modified: [] }, stats: { inputCount: 1, outputCount: 0, errorCount: 0 } },
+      '',
+    )
     return { success: true }
   }),
 
   batchDelete: publicProcedure
     .input(z.object({ ids: z.array(z.string()).min(1) }))
     .mutation(async ({ input }) => {
-      // TODO: add operation logging (Phase 4)
-      let errorCount = 0
-      for (const id of input.ids) {
-        try {
-          await deleteLink(id)
-        } catch {
-          errorCount++
-        }
-      }
-      return { success: true, deletedCount: input.ids.length - errorCount, errorCount }
+      const ids = input.ids
+      await deleteLinksByIds(ids)
+      await logOperation(
+        { type: 'manual_delete', changes: { added: [], removed: ids, modified: [] }, stats: { inputCount: ids.length, outputCount: 0, errorCount: 0 } },
+        '',
+      )
+      return { success: true, deletedCount: ids.length, errorCount: 0 }
     }),
 
   export: publicProcedure

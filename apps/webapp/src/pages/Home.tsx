@@ -86,8 +86,9 @@ export function HomePage() {
       ])
       setTotal(statsData.total)
       setByStatus(statsData.statusCounts)
+      const opsList = (opsData as { operations: Record<string, unknown>[] }).operations ?? []
       setRecentOps(
-        (Array.isArray(opsData) ? opsData : []).map((op: Record<string, unknown>) => ({
+        opsList.map((op) => ({
           id: op.id as string,
           type: op.type as string,
           timestamp: op.timestamp as string,

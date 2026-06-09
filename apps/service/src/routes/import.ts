@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
-import { insertImportJob, insertLink, updateImportJob } from '../lib/db/queries'
+import { insertImportJob, insertLinks, updateImportJob } from '../lib/db/queries'
 import { extractDomain, normalizeUrl } from '../lib/url/normalize'
 import { validateUrls } from '../lib/url/validate'
 import { publicProcedure, router } from '../trpc'
@@ -13,6 +13,8 @@ const DEFAULT_NORMALIZE_CONFIG = {
   sortQueryParams: false,
   removeFragment: true,
 }
+
+const BATCH_SIZE = 500
 
 export const importRouter = router({
   create: publicProcedure
@@ -28,6 +30,8 @@ export const importRouter = router({
         input: { type, content, strategy },
       } = opts
 
+      console.log(`[import] start: type=${type}, contentLen=${content.length}, strategy=${strategy}`)
+
       const jobId = uuidv4()
       await insertImportJob({
         id: jobId,
@@ -39,16 +43,25 @@ export const importRouter = router({
         duplicateCount: 0,
         errorCount: 0,
       })
+      console.log(`[import] job created: ${jobId}`)
 
       let urls: string[] = []
 
       if (type === 'JSON') {
         try {
           const parsed = JSON.parse(content)
-          urls = Array.isArray(parsed) ? parsed.map(String) : []
-        } catch {
+          console.log(`[import] JSON parsed: type=${typeof parsed}, isArray=${Array.isArray(parsed)}, sample=${JSON.stringify(parsed).slice(0, 200)}`)
+          urls = Array.isArray(parsed)
+            ? parsed.map((item: unknown) => {
+                if (typeof item === 'string') return item
+                if (item && typeof item === 'object' && 'url' in item) return String((item as { url: string }).url)
+                return String(item)
+              })
+            : []
+        } catch (err) {
+          console.error(`[import] JSON parse error:`, err)
           await updateImportJob(jobId, { status: 'failed', errorCount: 1 })
-          // throw createError({ statusCode: 400, statusMessage: 'Invalid JSON content' })
+          return { importedCount: 0, invalid: [] }
         }
       } else {
         urls = content
@@ -57,15 +70,25 @@ export const importRouter = router({
           .filter(Boolean)
       }
 
-      const { valid, invalid } = validateUrls(urls)
+      console.log(`[import] extracted ${urls.length} raw URLs`)
 
+      const { valid, invalid } = validateUrls(urls)
+      console.log(`[import] validated: valid=${valid.length}, invalid=${invalid.length}`)
       if (invalid.length > 0) {
+        console.log(`[import] invalid sample:`, invalid.slice(0, 5))
         await updateImportJob(jobId, { errorCount: invalid.length })
       }
 
       let importedCount = 0
-      let duplicateCount = 0
-      const seenNormalized = new Set<string>()
+      const batch: (typeof import('../lib/db/schema').linksTable.$inferInsert)[] = []
+
+      const flushBatch = async () => {
+        if (batch.length === 0) return
+        const count = batch.length
+        await insertLinks(batch)
+        batch.length = 0
+        console.log(`[import] flushed batch of ${count}, total imported so far: ${importedCount}`)
+      }
 
       for (let i = 0; i < valid.length; i++) {
         try {
@@ -77,7 +100,6 @@ export const importRouter = router({
           } else if (strategy === 'normalized') {
             normalizedUrl = normalizeUrl(originalUrl, DEFAULT_NORMALIZE_CONFIG)
           } else {
-            // smart: normalize only www and trailing slash
             normalizedUrl = normalizeUrl(originalUrl, {
               forceHttps: false,
               removeWww: true,
@@ -88,18 +110,9 @@ export const importRouter = router({
             })
           }
 
-          const duplicateKey = strategy === 'strict' ? originalUrl : normalizedUrl
-
-          if (seenNormalized.has(duplicateKey)) {
-            duplicateCount++
-            continue
-          }
-
-          seenNormalized.add(duplicateKey)
-
           const domain = extractDomain(originalUrl)
 
-          await insertLink({
+          batch.push({
             id: uuidv4(),
             originalUrl,
             normalizedUrl,
@@ -112,20 +125,27 @@ export const importRouter = router({
           })
 
           importedCount++
-        } catch {
-          // Skip individual errors
+
+          if (batch.length >= BATCH_SIZE) {
+            await flushBatch()
+          }
+        } catch (err) {
+          console.error(`[import] error at URL #${i}:`, err)
         }
       }
+
+      await flushBatch()
+
+      console.log(`[import] done: imported=${importedCount}, invalid=${invalid.length}`)
 
       await updateImportJob(jobId, {
         status: 'completed',
         importedCount,
-        duplicateCount,
       })
 
       return {
         importedCount,
-        invalid,
+        invalid: invalid.slice(0, 100),
       }
     }),
 })

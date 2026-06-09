@@ -8,6 +8,7 @@ const server = fastify({
   routerOptions: {
     maxParamLength: 5000,
   },
+  bodyLimit: 50 * 1024 * 1024, // 50MB
 })
 
 server.register(cors, {
@@ -22,8 +23,8 @@ server.register(fastifyTRPCPlugin, {
     router: appRouter,
     createContext,
     onError({ path, error }) {
-      // report to errror monitoring
-      console.error(`Error in tRPC handler on path '${path}':`, error)
+      console.error(`[tRPC] Error on path '${path}':`, error)
+      if (error.cause) console.error(`[tRPC] Cause:`, error.cause)
     },
   } satisfies FastifyTRPCPluginOptions<AppRouter>['trpcOptions'],
 })

@@ -1,10 +1,14 @@
 .control {
   display: block;
   padding: var(--mantine-spacing-xs) var(--mantine-spacing-md);
-  border-radius: var(--mantine-radius-md);
+  border-radius: var(--mantine-radius-xs);
   font-weight: 500;
 
   &:hover {
     background-color: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
+  }
+
+  &[aria-current="page"] {
+    background-color: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-5));
   }
 }
