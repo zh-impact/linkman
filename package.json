@@ -4,7 +4,7 @@
   "description": "",
   "keywords": [],
   "author": "Zeadust",
-  "license": "AGPL-3.0-or-later",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "knip": "knip"
