@@ -83,6 +83,7 @@ export function ImportPage() {
         type: fileType,
         content: fileContent,
         strategy: 'normalized',
+        filename: file?.name || undefined,
       })
       setResult({ importedCount: res.importedCount, invalid: res.invalid })
     } catch (err) {

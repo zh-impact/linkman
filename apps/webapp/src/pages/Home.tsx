@@ -199,7 +199,7 @@ export function HomePage() {
               <Text fw={600} mb="sm">
                 Quick Actions
               </Text>
-              <Grid gutter="sm">
+              <Grid gap="sm">
                 {[
                   { to: '/links', label: 'View Links' },
                   { to: '/import', label: 'Import Links' },

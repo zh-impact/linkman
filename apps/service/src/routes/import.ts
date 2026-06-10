@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import { insertImportJob, insertLinks, updateImportJob } from '../lib/db/queries'
+import { writeFile } from '../lib/files'
 import { extractDomain, normalizeUrl } from '../lib/url/normalize'
 import { validateUrls } from '../lib/url/validate'
 import { publicProcedure, router } from '../trpc'
@@ -23,20 +24,30 @@ export const importRouter = router({
         type: z.enum(['TXT', 'JSON']),
         content: z.string(),
         strategy: z.enum(['strict', 'normalized', 'smart']),
+        filename: z.string().optional(),
       }),
     )
     .mutation(async (opts) => {
       const {
-        input: { type, content, strategy },
+        input: { type, content, strategy, filename },
       } = opts
 
       console.log(`[import] start: type=${type}, contentLen=${content.length}, strategy=${strategy}`)
+
+      // Generate file path and save content to disk
+      const ts = new Date().toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, '')
+      const sanitized = (filename || '').replace(/[/\\]/g, '-').replace(/\s+/g, '-')
+      const fileRelPath = filename
+        ? `${ts}-${sanitized}`
+        : `clipboard-${ts}.txt`
+      await writeFile(fileRelPath, content)
+      console.log(`[import] file saved: ${fileRelPath}`)
 
       const jobId = uuidv4()
       await insertImportJob({
         id: jobId,
         type: type,
-        sourceContent: content,
+        sourceContent: fileRelPath,
         strategy: strategy,
         status: 'processing',
         importedCount: 0,

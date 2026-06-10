@@ -41,6 +41,9 @@ export function RootLayout() {
                   <UnstyledButton component={NavLink} to="/import" className={classes.control}>
                     Import
                   </UnstyledButton>
+                  <UnstyledButton component={NavLink} to="/files" className={classes.control}>
+                    Files
+                  </UnstyledButton>
                   <UnstyledButton component={NavLink} to="/dedup" className={classes.control}>
                     Dedup
                   </UnstyledButton>
