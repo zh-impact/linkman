@@ -7,6 +7,7 @@ import {
   Loader,
   ScrollArea,
   Stack,
+  Tabs,
   Text,
   Title,
 } from '@mantine/core'
@@ -22,6 +23,31 @@ function formatSize(bytes: number): string {
 }
 
 export function FilesPage() {
+  return (
+    <Container strategy="grid" size="lg">
+      <Title order={2} mb="md">
+        Files
+      </Title>
+
+      <Tabs defaultValue="sources">
+        <Tabs.List mb="md">
+          <Tabs.Tab value="sources">Sources</Tabs.Tab>
+          <Tabs.Tab value="resolved">Resolved</Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="sources">
+          <SourcesTab />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="resolved">
+          <ResolvedTab />
+        </Tabs.Panel>
+      </Tabs>
+    </Container>
+  )
+}
+
+function SourcesTab() {
   const [files, setFiles] = useState<Array<{ filename: string; size: number; modifiedAt: string }>>(
     [],
   )
@@ -81,91 +107,213 @@ export function FilesPage() {
     fetchFiles()
   }
 
+  if (loadingFiles) return <Loader />
+  if (files.length === 0) {
+    return (
+      <Text c="dimmed" ta="center" py="xl">
+        No files yet. Import some links first.
+      </Text>
+    )
+  }
+
   return (
-    <Container strategy="grid" size="lg">
+    <>
       {confirmDlg.modal}
-      <Title order={2} mb="md">
-        Files
-      </Title>
-
-      {loadingFiles ? (
-        <Loader />
-      ) : files.length === 0 ? (
-        <Text c="dimmed" ta="center" py="xl">
-          No files yet. Import some links first.
-        </Text>
-      ) : (
-        <Group gap="md" wrap="nowrap" align="flex-start">
-          {/* Left: file list */}
-          <Card withBorder p={0} w={300}>
-            <ScrollArea.Autosize mah="calc(100vh - 180px)" offsetScrollbars>
-              <Stack gap={0}>
-                {files.map((f) => (
-                  <Box
-                    key={f.filename}
-                    onClick={() => loadFileContent(f.filename)}
-                    p="sm"
-                    bg={selected === f.filename ? 'var(--mantine-color-blue-light)' : undefined}
-                    style={{
-                      borderBottom: '1px solid var(--mantine-color-gray-2)',
-                      width: '100%',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Group justify="space-between" wrap="nowrap">
-                      <Box style={{ flex: 1, minWidth: 0 }}>
-                        <Text size="sm" fw={500} truncate>
-                          {f.filename}
+      <Group gap="md" wrap="nowrap" align="flex-start">
+        {/* Left: file list */}
+        <Card withBorder p={0} w={300}>
+          <ScrollArea.Autosize mah="calc(100vh - 220px)" offsetScrollbars>
+            <Stack gap={0}>
+              {files.map((f) => (
+                <Box
+                  key={f.filename}
+                  onClick={() => loadFileContent(f.filename)}
+                  p="sm"
+                  bg={selected === f.filename ? 'var(--mantine-color-blue-light)' : undefined}
+                  style={{
+                    borderBottom: '1px solid var(--mantine-color-gray-2)',
+                    width: '100%',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Group justify="space-between" wrap="nowrap">
+                    <Box style={{ flex: 1, minWidth: 0 }}>
+                      <Text size="sm" fw={500} truncate>
+                        {f.filename}
+                      </Text>
+                      <Group gap="xs">
+                        <Text size="xs" c="dimmed">
+                          {formatSize(f.size)}
                         </Text>
-                        <Group gap="xs">
-                          <Text size="xs" c="dimmed">
-                            {formatSize(f.size)}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {new Date(f.modifiedAt).toLocaleString()}
-                          </Text>
-                        </Group>
-                      </Box>
-                      <ActionIcon
-                        size="xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(f.filename)
-                        }}
-                        title="Delete"
-                      >
-                        ✕
-                      </ActionIcon>
-                    </Group>
-                  </Box>
-                ))}
-              </Stack>
-            </ScrollArea.Autosize>
-          </Card>
+                        <Text size="xs" c="dimmed">
+                          {new Date(f.modifiedAt).toLocaleString()}
+                        </Text>
+                      </Group>
+                    </Box>
+                    <ActionIcon
+                      size="xs"
+                      variant="subtle"
+                      color="red"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(f.filename)
+                      }}
+                      title="Delete"
+                    >
+                      ✕
+                    </ActionIcon>
+                  </Group>
+                </Box>
+              ))}
+            </Stack>
+          </ScrollArea.Autosize>
+        </Card>
 
-          {/* Right: file content */}
-          <Card withBorder p={0} style={{ flex: 1, minWidth: 0 }}>
-            {!selected ? (
-              <Text c="dimmed" ta="center" py="xl">
-                Select a file to view its content
-              </Text>
-            ) : loadingContent ? (
-              <Box py="xl" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Loader />
-              </Box>
-            ) : contentError ? (
-              <Text c="red" ta="center" py="xl">
-                {contentError}
-              </Text>
-            ) : (
-              <VirtualLineViewer lines={allLines} filename={selected} />
-            )}
-          </Card>
+        {/* Right: file content */}
+        <Card withBorder p={0} style={{ flex: 1, minWidth: 0 }}>
+          {!selected ? (
+            <Text c="dimmed" ta="center" py="xl">
+              Select a file to view its content
+            </Text>
+          ) : loadingContent ? (
+            <Box
+              py="xl"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Loader />
+            </Box>
+          ) : contentError ? (
+            <Text c="red" ta="center" py="xl">
+              {contentError}
+            </Text>
+          ) : (
+            <VirtualLineViewer lines={allLines} filename={selected} />
+          )}
+        </Card>
+      </Group>
+    </>
+  )
+}
+
+function ResolvedTab() {
+  const [urls, setUrls] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const fetched = useRef(false)
+
+  useEffect(() => {
+    if (fetched.current) return
+    fetched.current = true
+    ;(async () => {
+      try {
+        const data = await trpc.files.resolved.query()
+        setUrls(data.urls)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load resolved links')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [])
+
+  if (loading) return <Loader />
+  if (error) {
+    return (
+      <Text c="red" ta="center" py="xl">
+        {error}
+      </Text>
+    )
+  }
+
+  return (
+    <Card withBorder p={0}>
+      <ResolvedLineViewer urls={urls} />
+    </Card>
+  )
+}
+
+function ResolvedLineViewer({ urls }: { urls: string[] }) {
+  const parentRef = useRef<HTMLDivElement>(null)
+
+  const virtualizer = useVirtualizer({
+    count: urls.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 22,
+    overscan: 10,
+  })
+
+  return (
+    <>
+      <Box px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
+        <Group justify="space-between">
+          <Text size="sm" fw={500}>
+            Resolved unique URLs
+          </Text>
+          <Text size="xs" c="dimmed">
+            {urls.length.toLocaleString()} URLs
+          </Text>
         </Group>
-      )}
-    </Container>
+      </Box>
+      <Box
+        ref={parentRef}
+        style={{
+          height: `calc(100vh - 260px)`,
+          overflow: 'auto',
+        }}
+      >
+        <Box style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+          {virtualizer.getVirtualItems().map((item) => (
+            <Box
+              key={item.key}
+              ref={(el) => {
+                if (el) virtualizer.measureElement(el)
+              }}
+              data-index={item.index}
+              style={{
+                position: 'absolute',
+                top: item.start,
+                left: 0,
+                right: 0,
+                display: 'flex',
+                fontFamily: 'var(--mantine-font-family-monospace)',
+                fontSize: 'var(--mantine-font-size-xs)',
+                lineHeight: '22px',
+              }}
+            >
+              <Text
+                c="dimmed"
+                ta="right"
+                w={60}
+                px="xs"
+                style={{
+                  flexShrink: 0,
+                  userSelect: 'none',
+                  borderRight: '1px solid var(--mantine-color-gray-2)',
+                }}
+              >
+                {item.index + 1}
+              </Text>
+              <Text
+                component="a"
+                href={urls[item.index]}
+                target="_blank"
+                rel="noopener noreferrer"
+                c="blue"
+                td="underline"
+                px="xs"
+                style={{
+                  flex: 1,
+                  wordBreak: 'break-all',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {urls[item.index]}
+              </Text>
+            </Box>
+          ))}
+        </Box>
+      </Box>
+    </>
   )
 }
 
@@ -196,7 +344,7 @@ function VirtualLineViewer({ lines, filename }: { lines: string[]; filename: str
       <Box
         ref={parentRef}
         style={{
-          height: `calc(100vh - 220px)`,
+          height: `calc(100vh - 260px)`,
           overflow: 'auto',
         }}
       >

@@ -444,7 +444,9 @@ export function LinksPage() {
         input.status = status
       }
       const res = await trpc.links.export.query(input)
-      const blob = new Blob([res.data], { type: format === 'csv' ? 'text/csv' : 'application/json' })
+      const blob = new Blob([res.data], {
+        type: format === 'csv' ? 'text/csv' : 'application/json',
+      })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -489,12 +491,8 @@ export function LinksPage() {
             </Menu.Target>
             <Menu.Dropdown>
               <Menu.Label>Current View</Menu.Label>
-              <Menu.Item onClick={() => handleExport('csv', 'filtered')}>
-                Export as CSV
-              </Menu.Item>
-              <Menu.Item onClick={() => handleExport('json', 'filtered')}>
-                Export as JSON
-              </Menu.Item>
+              <Menu.Item onClick={() => handleExport('csv', 'filtered')}>Export as CSV</Menu.Item>
+              <Menu.Item onClick={() => handleExport('json', 'filtered')}>Export as JSON</Menu.Item>
               {selectedIds.size > 0 && (
                 <>
                   <Menu.Divider />
@@ -566,21 +564,6 @@ export function LinksPage() {
             <Badge size="sm" variant="light" style={{ cursor: 'pointer' }} onClick={selectNone}>
               None
             </Badge>
-
-            <Select
-              size="sm"
-              placeholder="Filter by status"
-              data={STATUS_OPTIONS.filter((o) => o.value)}
-              w={150}
-              onChange={(v) => {
-                if (v) {
-                  setStatus(v)
-                  setPage(1)
-                }
-              }}
-              clearable
-              value=""
-            />
 
             {selectedIds.size > 0 && (
               <>
