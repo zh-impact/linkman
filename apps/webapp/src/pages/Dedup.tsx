@@ -54,8 +54,15 @@ export function DedupPage() {
   const [preview, setPreview] = useState<{
     duplicateCount: number
     remainingCount: number
-    groups: Array<{ keepId: string; duplicateIds: string[] }>
+    groups: Array<{
+      keepId: string
+      duplicateIds: string[]
+      keepUrl: string
+      duplicateUrls: string[]
+      normalizedUrl: string
+    }>
   } | null>(null)
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const [result, setResult] = useState<{
     duplicateCount: number
     remainingCount: number
@@ -106,6 +113,15 @@ export function DedupPage() {
   const toggleNormalize = (key: string) => {
     setNormalizeConfig((prev) => ({ ...prev, [key]: !prev[key] }))
     setPreview(null)
+  }
+
+  const toggleGroup = (index: number) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
   }
 
   return (
@@ -208,7 +224,7 @@ export function DedupPage() {
                 })
                 if (ok) handleExecute()
               }}
-              disabled={executing}
+              disabled={executing || !preview || preview.duplicateCount === 0}
             >
               Execute
             </Button>
@@ -246,19 +262,109 @@ export function DedupPage() {
                 <Text fw={600} mb="sm">
                   Duplicate Groups ({preview.groups.length})
                 </Text>
-                <Box mah={300} style={{ overflowY: 'auto' }}>
+                <Box mah={400} style={{ overflowY: 'auto' }}>
                   <Stack gap="xs">
                     {preview.groups.slice(0, MAX_GROUPS_DISPLAY).map((group, i) => (
-                      <Card key={i} withBorder p="xs" bg="var(--mantine-color-gray-light)">
-                        <Group gap="xs">
-                          <Badge color="green" size="sm">
-                            Keep: {group.keepId.slice(0, 8)}
-                          </Badge>
-                          <Badge color="orange" size="sm">
-                            {group.duplicateIds.length} duplicate
-                            {group.duplicateIds.length > 1 ? 's' : ''}
-                          </Badge>
+                      <Card
+                        key={i}
+                        withBorder
+                        p="xs"
+                        bg={
+                          expandedGroups.has(i)
+                            ? 'var(--mantine-color-blue-light)'
+                            : 'var(--mantine-color-gray-light)'
+                        }
+                      >
+                        <Group
+                          justify="space-between"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => toggleGroup(i)}
+                        >
+                          <Group gap="xs">
+                            <Badge color="green" size="sm">
+                              Keep: {group.keepId.slice(0, 8)}
+                            </Badge>
+                            <Badge
+                              color={
+                                group.duplicateIds.length >= 4
+                                  ? 'red'
+                                  : group.duplicateIds.length >= 2
+                                    ? 'orange'
+                                    : 'yellow'
+                              }
+                              size="sm"
+                            >
+                              {group.duplicateIds.length} duplicate
+                              {group.duplicateIds.length > 1 ? 's' : ''}
+                            </Badge>
+                          </Group>
+                          <Text size="xs" c="dimmed" truncate maw={300}>
+                            {group.keepUrl}
+                          </Text>
                         </Group>
+                        {expandedGroups.has(i) && (
+                          <Box
+                            mt="xs"
+                            pt="xs"
+                            style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Text size="xs" fw={600} c="dimmed" mb={4}>
+                              All URLs in group (
+                              {group.keepUrl === group.normalizedUrl
+                                ? 'strict match'
+                                : 'normalized to: ' + group.normalizedUrl}
+                              ):
+                            </Text>
+                            <Stack gap={2}>
+                              <Text
+                                size="xs"
+                                c="green"
+                                ff="monospace"
+                                style={{ wordBreak: 'break-all' }}
+                              >
+                                {'[KEEP]'}
+                                <Text
+                                  component="a"
+                                  href={group.keepUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  c="green"
+                                  td="underline"
+                                  size="xs"
+                                  span
+                                  ff="monospace"
+                                >
+                                  {group.keepUrl}
+                                </Text>
+                              </Text>
+                              {group.duplicateUrls.map((url, j) => (
+                                <Text
+                                  key={j}
+                                  size="xs"
+                                  c="orange"
+                                  ff="monospace"
+                                  style={{ wordBreak: 'break-all' }}
+                                >
+                                  {'[DUP]  '}
+                                  <Text
+                                    component="a"
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    c="orange"
+                                    td="underline"
+                                    size="xs"
+                                    span
+                                    ff="monospace"
+                                  >
+                                    {url}
+                                  </Text>
+                                </Text>
+                              ))}
+                            </Stack>
+                          </Box>
+                        )}
                       </Card>
                     ))}
                     {preview.groups.length > MAX_GROUPS_DISPLAY && (

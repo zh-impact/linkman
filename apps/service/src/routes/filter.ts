@@ -21,7 +21,7 @@ export const filterRouter = router({
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
-          targetLinks = await getAllLinks()
+          targetLinks = (await getAllLinks()).filter((l) => l.status !== 'filtered_internal')
         }
 
         const filteredIds: string[] = []
@@ -49,7 +49,7 @@ export const filterRouter = router({
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
-          targetLinks = await getAllLinks()
+          targetLinks = (await getAllLinks()).filter((l) => l.status !== 'filtered_internal')
         }
 
         const filteredIds: string[] = []

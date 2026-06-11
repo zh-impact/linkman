@@ -42,8 +42,10 @@ function getNormalizeUrl(strategy: string, normalizeConfig: z.infer<typeof norma
 }
 
 function findDuplicateGroups(allLinks: Awaited<ReturnType<typeof getAllLinks>>, normalize: (url: string) => string) {
+  const linkMap = new Map<string, { id: string; url: string }>()
   const normalizedMap = new Map<string, string[]>()
   for (const link of allLinks) {
+    linkMap.set(link.id, { id: link.id, url: link.originalUrl })
     const normalizedUrl = normalize(link.originalUrl)
     if (!normalizedMap.has(normalizedUrl)) {
       normalizedMap.set(normalizedUrl, [])
@@ -51,13 +53,25 @@ function findDuplicateGroups(allLinks: Awaited<ReturnType<typeof getAllLinks>>, 
     normalizedMap.get(normalizedUrl)!.push(link.id)
   }
 
-  const groups: Array<{ keepId: string; duplicateIds: string[] }> = []
+  const groups: Array<{
+    keepId: string
+    duplicateIds: string[]
+    keepUrl: string
+    duplicateUrls: string[]
+    normalizedUrl: string
+  }> = []
   let duplicateCount = 0
 
-  for (const [, ids] of normalizedMap) {
+  for (const [normalizedUrl, ids] of normalizedMap) {
     if (ids.length <= 1) continue
     const [keepId, ...duplicateIds] = ids
-    groups.push({ keepId, duplicateIds })
+    groups.push({
+      keepId,
+      duplicateIds,
+      keepUrl: linkMap.get(keepId)!.url,
+      duplicateUrls: duplicateIds.map((id) => linkMap.get(id)!.url),
+      normalizedUrl,
+    })
     duplicateCount += duplicateIds.length
   }
 
@@ -75,7 +89,9 @@ export const deduplicateRouter = router({
     )
     .query(async ({ input }) => {
       const { strategy, sort, normalizeConfig } = input
-      const allLinks = await getAllLinks()
+      const allLinks = (await getAllLinks()).filter(
+        (l) => l.status !== 'duplicate_removed' && l.status !== 'filtered_internal' && l.status !== 'filtered_similar',
+      )
 
       if (sort === 'alphabetical') {
         allLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))
@@ -103,7 +119,9 @@ export const deduplicateRouter = router({
     )
     .mutation(async ({ input }) => {
       const { strategy, sort, normalizeConfig } = input
-      const allLinks = await getAllLinks()
+      const allLinks = (await getAllLinks()).filter(
+        (l) => l.status !== 'duplicate_removed' && l.status !== 'filtered_internal' && l.status !== 'filtered_similar',
+      )
 
       if (sort === 'alphabetical') {
         allLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))

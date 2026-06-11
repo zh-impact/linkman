@@ -115,6 +115,7 @@ function InternalFilter() {
             <Button
               variant="filled"
               color="red"
+              disabled={executing || !preview || preview.filteredCount === 0}
               onClick={async () => {
                 const msg = preview
                   ? `Will mark ${preview.filteredCount} internal links. This can be rolled back via operation history.`
@@ -127,7 +128,6 @@ function InternalFilter() {
                 })
                 if (ok) handleExecute()
               }}
-              disabled={executing}
             >
               Execute
             </Button>
