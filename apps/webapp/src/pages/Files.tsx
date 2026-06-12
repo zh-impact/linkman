@@ -195,26 +195,47 @@ function SourcesTab() {
   )
 }
 
+const PAGE_SIZE = 500
+
 function ResolvedTab() {
   const [urls, setUrls] = useState<string[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
   const fetched = useRef(false)
+
+  const fetchPage = useCallback(async (offset: number) => {
+    try {
+      const data = await trpc.files.resolved.query({ limit: PAGE_SIZE, offset })
+      if (offset === 0) {
+        setUrls(data.urls)
+        setTotal(data.total)
+      } else {
+        setUrls((prev) => [...prev, ...data.urls])
+      }
+      return data.urls.length
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load resolved links')
+      return 0
+    }
+  }, [])
 
   useEffect(() => {
     if (fetched.current) return
     fetched.current = true
     ;(async () => {
-      try {
-        const data = await trpc.files.resolved.query()
-        setUrls(data.urls)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load resolved links')
-      } finally {
-        setLoading(false)
-      }
+      await fetchPage(0)
+      setLoading(false)
     })()
-  }, [])
+  }, [fetchPage])
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || urls.length >= total) return
+    setLoadingMore(true)
+    await fetchPage(urls.length)
+    setLoadingMore(false)
+  }, [loadingMore, urls.length, total, fetchPage])
 
   if (loading) return <Loader />
   if (error) {
@@ -227,13 +248,24 @@ function ResolvedTab() {
 
   return (
     <Card withBorder p={0}>
-      <ResolvedLineViewer urls={urls} />
+      <ResolvedLineViewer urls={urls} total={total} onLoadMore={loadMore} loadingMore={loadingMore} />
     </Card>
   )
 }
 
-function ResolvedLineViewer({ urls }: { urls: string[] }) {
+function ResolvedLineViewer({
+  urls,
+  total,
+  onLoadMore,
+  loadingMore,
+}: {
+  urls: string[]
+  total: number
+  onLoadMore: () => void
+  loadingMore: boolean
+}) {
   const parentRef = useRef<HTMLDivElement>(null)
+  const loadingTriggered = useRef(false)
 
   const virtualizer = useVirtualizer({
     count: urls.length,
@@ -242,6 +274,18 @@ function ResolvedLineViewer({ urls }: { urls: string[] }) {
     overscan: 10,
   })
 
+  const virtualItems = virtualizer.getVirtualItems()
+  const lastVisibleIndex = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1].index : 0
+
+  if (lastVisibleIndex >= urls.length - 20 && urls.length < total && !loadingMore && !loadingTriggered.current) {
+    loadingTriggered.current = true
+    onLoadMore()
+  }
+
+  if (!loadingMore) {
+    loadingTriggered.current = false
+  }
+
   return (
     <>
       <Box px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
@@ -249,9 +293,12 @@ function ResolvedLineViewer({ urls }: { urls: string[] }) {
           <Text size="sm" fw={500}>
             Resolved unique URLs
           </Text>
-          <Text size="xs" c="dimmed">
-            {urls.length.toLocaleString()} URLs
-          </Text>
+          <Group gap="xs">
+            {loadingMore && <Loader size="xs" />}
+            <Text size="xs" c="dimmed">
+              {urls.length.toLocaleString()} / {total.toLocaleString()}
+            </Text>
+          </Group>
         </Group>
       </Box>
       <Box
@@ -261,56 +308,57 @@ function ResolvedLineViewer({ urls }: { urls: string[] }) {
           overflow: 'auto',
         }}
       >
-        <Box style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((item) => (
-            <Box
-              key={item.key}
-              ref={(el) => {
-                if (el) virtualizer.measureElement(el)
-              }}
-              data-index={item.index}
-              style={{
-                position: 'absolute',
-                top: item.start,
-                left: 0,
-                right: 0,
-                display: 'flex',
-                fontFamily: 'var(--mantine-font-family-monospace)',
-                fontSize: 'var(--mantine-font-size-xs)',
-                lineHeight: '22px',
-              }}
-            >
-              <Text
-                c="dimmed"
-                ta="right"
-                w={60}
-                px="xs"
+        <Box style={{ height: urls.length * 22, width: '100%', position: 'relative' }}>
+          {virtualItems.map((item) => {
+            const url = urls[item.index]
+            return (
+              <Box
+                key={item.key}
                 style={{
-                  flexShrink: 0,
-                  userSelect: 'none',
-                  borderRight: '1px solid var(--mantine-color-gray-2)',
+                  position: 'absolute',
+                  top: item.start,
+                  left: 0,
+                  right: 0,
+                  height: 22,
+                  display: 'flex',
+                  fontFamily: 'var(--mantine-font-family-monospace)',
+                  fontSize: 'var(--mantine-font-size-xs)',
+                  lineHeight: '22px',
                 }}
               >
-                {item.index + 1}
-              </Text>
-              <Text
-                component="a"
-                href={urls[item.index]}
-                target="_blank"
-                rel="noopener noreferrer"
-                c="blue"
-                td="underline"
-                px="xs"
-                style={{
-                  flex: 1,
-                  wordBreak: 'break-all',
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {urls[item.index]}
-              </Text>
-            </Box>
-          ))}
+                <Text
+                  c="dimmed"
+                  ta="right"
+                  w={60}
+                  px="xs"
+                  style={{
+                    flexShrink: 0,
+                    userSelect: 'none',
+                    borderRight: '1px solid var(--mantine-color-gray-2)',
+                  }}
+                >
+                  {item.index + 1}
+                </Text>
+                <Text
+                  component="a"
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  c="blue"
+                  td="underline"
+                  px="xs"
+                  style={{
+                    flex: 1,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {url}
+                </Text>
+              </Box>
+            )
+          })}
         </Box>
       </Box>
     </>

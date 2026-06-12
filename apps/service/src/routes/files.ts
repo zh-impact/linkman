@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { getAllLinks } from '../lib/db/queries'
+import { getResolvedUrlCount, getResolvedUrls } from '../lib/db/queries'
 import { deleteFile, listFiles, readFile, readFileLines } from '../lib/files'
 import { publicProcedure, router } from '../trpc'
 
@@ -30,21 +30,15 @@ export const filesRouter = router({
     return { success: true }
   }),
 
-  resolved: publicProcedure.query(async () => {
-    const allLinks = (await getAllLinks()).filter(
-      (l) =>
-        l.status !== 'duplicate_removed' &&
-        l.status !== 'filtered_internal' &&
-        l.status !== 'filtered_similar',
+  resolved: publicProcedure
+    .input(
+      z.object({
+        limit: z.number().min(1).max(2000).default(500),
+        offset: z.number().min(0).default(0),
+      }),
     )
-    const seen = new Set<string>()
-    const urls: string[] = []
-    for (const link of allLinks) {
-      if (!seen.has(link.originalUrl)) {
-        seen.add(link.originalUrl)
-        urls.push(link.originalUrl)
-      }
-    }
-    return { total: urls.length, urls }
-  }),
+    .query(async ({ input }) => {
+      const [total, rows] = await Promise.all([getResolvedUrlCount(), getResolvedUrls(input.limit, input.offset)])
+      return { total: total!.count, urls: rows.map((r) => r.url) }
+    }),
 })

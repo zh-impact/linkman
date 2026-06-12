@@ -84,6 +84,37 @@ export async function getLinksCount() {
   return db.select({ count: sql<number>`count(*)` }).from(linksTable).get()
 }
 
+export async function getResolvedUrlCount() {
+  return db
+    .select({ count: sql<number>`count(DISTINCT ${linksTable.originalUrl})` })
+    .from(linksTable)
+    .where(
+      and(
+        sql`${linksTable.status} != 'duplicate_removed'`,
+        sql`${linksTable.status} != 'filtered_internal'`,
+        sql`${linksTable.status} != 'filtered_similar'`,
+      ),
+    )
+    .get()
+}
+
+export async function getResolvedUrls(limit: number, offset: number) {
+  return db
+    .selectDistinct({ url: linksTable.originalUrl })
+    .from(linksTable)
+    .where(
+      and(
+        sql`${linksTable.status} != 'duplicate_removed'`,
+        sql`${linksTable.status} != 'filtered_internal'`,
+        sql`${linksTable.status} != 'filtered_similar'`,
+      ),
+    )
+    .orderBy(linksTable.originalUrl)
+    .limit(limit)
+    .offset(offset)
+    .all()
+}
+
 export async function getAllLinkIds() {
   const results = await db.select({ id: linksTable.id }).from(linksTable).all()
   return results.map((r) => r.id)
