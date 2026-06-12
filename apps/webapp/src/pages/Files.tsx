@@ -1,16 +1,25 @@
 import {
   ActionIcon,
+  Alert,
   Box,
+  Button,
   Card,
+  Code,
   Container,
+  Divider,
+  FileInput,
   Group,
   Loader,
+  Modal,
   ScrollArea,
+  SegmentedControl,
   Stack,
   Tabs,
   Text,
   Title,
+  UnstyledButton,
 } from '@mantine/core'
+import { useDisclosure } from '@mantine/hooks'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { trpc } from '../utils/trpc-client'
@@ -56,6 +65,7 @@ function SourcesTab() {
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [loadingContent, setLoadingContent] = useState(false)
   const [contentError, setContentError] = useState('')
+  const [importOpened, { open: openImport, close: closeImport }] = useDisclosure(false)
   const confirmDlg = useConfirm()
 
   const fetchFiles = useCallback(async () => {
@@ -107,91 +117,264 @@ function SourcesTab() {
     fetchFiles()
   }
 
-  if (loadingFiles) return <Loader />
-  if (files.length === 0) {
-    return (
-      <Text c="dimmed" ta="center" py="xl">
-        No files yet. Import some links first.
-      </Text>
-    )
+  const handleImportDone = () => {
+    closeImport()
+    fetchFiles()
   }
 
   return (
     <>
       {confirmDlg.modal}
-      <Group gap="md" wrap="nowrap" align="flex-start">
-        {/* Left: file list */}
-        <Card withBorder p={0} w={300}>
-          <ScrollArea.Autosize mah="calc(100vh - 220px)" offsetScrollbars>
-            <Stack gap={0}>
-              {files.map((f) => (
-                <Box
-                  key={f.filename}
-                  onClick={() => loadFileContent(f.filename)}
-                  p="sm"
-                  bg={selected === f.filename ? 'var(--mantine-color-blue-light)' : undefined}
-                  style={{
-                    borderBottom: '1px solid var(--mantine-color-gray-2)',
-                    width: '100%',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Group justify="space-between" wrap="nowrap">
-                    <Box style={{ flex: 1, minWidth: 0 }}>
-                      <Text size="sm" fw={500} truncate>
-                        {f.filename}
-                      </Text>
-                      <Group gap="xs">
-                        <Text size="xs" c="dimmed">
-                          {formatSize(f.size)}
+      <ImportModal opened={importOpened} onClose={handleImportDone} />
+      <Group mb="md">
+        <Button onClick={openImport}>Import</Button>
+      </Group>
+
+      {loadingFiles ? (
+        <Loader />
+      ) : files.length === 0 ? (
+        <Text c="dimmed" ta="center" py="xl">
+          No files yet. Click Import to get started.
+        </Text>
+      ) : (
+        <Group gap="md" wrap="nowrap" align="flex-start">
+          {/* Left: file list */}
+          <Card withBorder p={0} w={300}>
+            <ScrollArea.Autosize mah="calc(100vh - 280px)" offsetScrollbars>
+              <Stack gap={0}>
+                {files.map((f) => (
+                  <Box
+                    key={f.filename}
+                    onClick={() => loadFileContent(f.filename)}
+                    p="sm"
+                    bg={selected === f.filename ? 'var(--mantine-color-blue-light)' : undefined}
+                    style={{
+                      borderBottom: '1px solid var(--mantine-color-gray-2)',
+                      width: '100%',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <Group justify="space-between" wrap="nowrap">
+                      <Box style={{ flex: 1, minWidth: 0 }}>
+                        <Text size="sm" fw={500} truncate>
+                          {f.filename}
                         </Text>
-                        <Text size="xs" c="dimmed">
-                          {new Date(f.modifiedAt).toLocaleString()}
-                        </Text>
-                      </Group>
-                    </Box>
-                    <ActionIcon
-                      size="xs"
-                      variant="subtle"
-                      color="red"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDelete(f.filename)
-                      }}
-                      title="Delete"
-                    >
-                      ✕
-                    </ActionIcon>
-                  </Group>
-                </Box>
-              ))}
-            </Stack>
-          </ScrollArea.Autosize>
+                        <Group gap="xs">
+                          <Text size="xs" c="dimmed">
+                            {formatSize(f.size)}
+                          </Text>
+                          <Text size="xs" c="dimmed">
+                            {new Date(f.modifiedAt).toLocaleString()}
+                          </Text>
+                        </Group>
+                      </Box>
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        color="red"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDelete(f.filename)
+                        }}
+                        title="Delete"
+                      >
+                        ✕
+                      </ActionIcon>
+                    </Group>
+                  </Box>
+                ))}
+              </Stack>
+            </ScrollArea.Autosize>
+          </Card>
+
+          {/* Right: file content */}
+          <Card withBorder p={0} style={{ flex: 1, minWidth: 0 }}>
+            {!selected ? (
+              <Text c="dimmed" ta="center" py="xl">
+                Select a file to view its content
+              </Text>
+            ) : loadingContent ? (
+              <Box
+                py="xl"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Loader />
+              </Box>
+            ) : contentError ? (
+              <Text c="red" ta="center" py="xl">
+                {contentError}
+              </Text>
+            ) : (
+              <VirtualLineViewer lines={allLines} filename={selected} />
+            )}
+          </Card>
+        </Group>
+      )}
+    </>
+  )
+}
+
+function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void }) {
+  const [file, setFile] = useState<File | null>(null)
+  const [fileContent, setFileContent] = useState('')
+  const [fileType, setFileType] = useState<'TXT' | 'JSON'>('TXT')
+  const [isImporting, setIsImporting] = useState(false)
+  const [result, setResult] = useState<{
+    importedCount: number
+    invalid: string[]
+  } | null>(null)
+  const [error, setError] = useState('')
+
+  const resetRef = useRef<() => void>(null)
+
+  const reset = useCallback(() => {
+    setFile(null)
+    setFileContent('')
+    setError('')
+    setResult(null)
+    setFileType('TXT')
+    resetRef.current?.()
+  }, [])
+
+  const handleClose = () => {
+    reset()
+    onClose()
+  }
+
+  const handleFileSelect = async (selected: File | null) => {
+    if (!selected) return
+    setFile(selected)
+    setError('')
+    setResult(null)
+
+    const ext = selected.name.split('.').pop()
+    if (ext === 'json') {
+      setFileType('JSON')
+    } else {
+      setFileType('TXT')
+    }
+    try {
+      const text = await selected.text()
+      setFileContent(text)
+    } catch {
+      setError('Failed to read file')
+    }
+  }
+
+  const handlePasteFromClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (!text.trim()) {
+        setError('Clipboard is empty')
+        return
+      }
+      setError('')
+      setResult(null)
+      setFileContent(text)
+      const trimmed = text.trim()
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        setFileType('JSON')
+      } else {
+        setFileType('TXT')
+      }
+    } catch {
+      setError('Failed to read from clipboard')
+    }
+  }
+
+  const handleImport = async () => {
+    if (!fileContent) return
+    setIsImporting(true)
+    setError('')
+    setResult(null)
+
+    try {
+      const res = await trpc.import.create.mutate({
+        type: fileType,
+        content: fileContent,
+        strategy: 'normalized',
+        filename: file?.name || undefined,
+      })
+      setResult({ importedCount: res.importedCount, invalid: res.invalid })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
+  return (
+    <Modal opened={opened} onClose={handleClose} title="Import Links" size="lg">
+      <Stack gap="md">
+        <Card withBorder>
+          <Text fw={500}>Select File or Paste</Text>
+          <Text size="sm" c="dimmed">
+            Upload .txt/.json file or paste content from clipboard
+          </Text>
+          <Stack mt="xs">
+            <FileInput
+              resetRef={resetRef}
+              accept=".txt,.json"
+              placeholder="Select file..."
+              value={file}
+              onChange={handleFileSelect}
+            />
+            <Divider label="OR" />
+            <Button onClick={handlePasteFromClipboard}>Paste from Clipboard</Button>
+          </Stack>
         </Card>
 
-        {/* Right: file content */}
-        <Card withBorder p={0} style={{ flex: 1, minWidth: 0 }}>
-          {!selected ? (
-            <Text c="dimmed" ta="center" py="xl">
-              Select a file to view its content
-            </Text>
-          ) : loadingContent ? (
-            <Box
-              py="xl"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Loader />
-            </Box>
-          ) : contentError ? (
-            <Text c="red" ta="center" py="xl">
-              {contentError}
-            </Text>
-          ) : (
-            <VirtualLineViewer lines={allLines} filename={selected} />
-          )}
+        <Card withBorder>
+          <Text fw={500}>File Type</Text>
+          <SegmentedControl
+            value={fileType}
+            onChange={(v) => setFileType(v as 'TXT' | 'JSON')}
+            data={['TXT', 'JSON']}
+          />
         </Card>
-      </Group>
-    </>
+
+        {fileContent && (
+          <Card withBorder>
+            <Group justify="space-between" mb="xs">
+              <Text fw={500}>Content Preview</Text>
+              <UnstyledButton onClick={reset}>Clear</UnstyledButton>
+            </Group>
+
+            <Stack>
+              <Code block mah="12rem">
+                {fileContent.slice(0, 2000)}
+                {fileContent.length > 2000 && (
+                  <Text c="dimmed" size="xs">
+                    ... ({fileContent.length - 2000} more characters)
+                  </Text>
+                )}
+              </Code>
+              <Text c="dimmed" size="xs">
+                {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length}{' '}
+                characters
+              </Text>
+            </Stack>
+          </Card>
+        )}
+
+        <Button loading={isImporting} disabled={!fileContent} onClick={handleImport}>
+          Import
+        </Button>
+
+        {error && (
+          <Alert color="red" title="Import Failed">
+            {error}
+          </Alert>
+        )}
+
+        {result && (
+          <Alert color="green" title="Import Successful!">
+            <Text size="sm">Imported: {result.importedCount} links</Text>
+            {result.invalid.length > 0 && <Text size="sm">Invalid: {result.invalid.length}</Text>}
+          </Alert>
+        )}
+      </Stack>
+    </Modal>
   )
 }
 

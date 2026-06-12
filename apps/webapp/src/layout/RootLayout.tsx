@@ -38,9 +38,6 @@ export function RootLayout() {
                   <UnstyledButton component={NavLink} to="/links" className={classes.control}>
                     Links
                   </UnstyledButton>
-                  <UnstyledButton component={NavLink} to="/import" className={classes.control}>
-                    Import
-                  </UnstyledButton>
                   <UnstyledButton component={NavLink} to="/files" className={classes.control}>
                     Files
                   </UnstyledButton>

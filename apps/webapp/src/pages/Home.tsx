@@ -202,7 +202,7 @@ export function HomePage() {
               <Grid gap="sm">
                 {[
                   { to: '/links', label: 'View Links' },
-                  { to: '/import', label: 'Import Links' },
+                  { to: '/files', label: 'Files' },
                   { to: '/dedup', label: 'Deduplicate' },
                   { to: '/filter', label: 'Filter' },
                   { to: '/history', label: 'History' },
