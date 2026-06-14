@@ -22,7 +22,10 @@ export async function deleteLink(id: string) {
 
 export async function deleteLinksByIds(ids: string[]) {
   if (ids.length === 0) return
-  return db.delete(linksTable).where(inArray(linksTable.id, ids)).run()
+  const BATCH = 500
+  for (let i = 0; i < ids.length; i += BATCH) {
+    await db.delete(linksTable).where(inArray(linksTable.id, ids.slice(i, i + BATCH))).run()
+  }
 }
 
 export async function getLinkById(id: string) {
