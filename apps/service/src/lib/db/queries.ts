@@ -28,12 +28,44 @@ export async function deleteLinksByIds(ids: string[]) {
   }
 }
 
+export async function updateLinksStatusByIds(
+  ids: string[],
+  data: Partial<typeof linksTable.$inferInsert>,
+) {
+  if (ids.length === 0) return
+  const BATCH = 500
+  for (let i = 0; i < ids.length; i += BATCH) {
+    await db.update(linksTable).set(data).where(inArray(linksTable.id, ids.slice(i, i + BATCH))).run()
+  }
+}
+
 export async function getLinkById(id: string) {
   return db.select().from(linksTable).where(eq(linksTable.id, id)).get()
 }
 
 export async function getAllLinks() {
   return db.select().from(linksTable).all()
+}
+
+export type AnalysisLink = {
+  id: string
+  originalUrl: string
+  normalizedUrl: string
+  domain: string
+}
+
+/** Get only the columns needed for dedup/filter analysis, excluding already-removed links. */
+export async function getActiveLinksForAnalysis(): Promise<AnalysisLink[]> {
+  return db
+    .select({
+      id: linksTable.id,
+      originalUrl: linksTable.originalUrl,
+      normalizedUrl: linksTable.normalizedUrl,
+      domain: linksTable.domain,
+    })
+    .from(linksTable)
+    .where(sql`${linksTable.status} NOT IN ('duplicate_removed', 'filtered_internal', 'filtered_similar')`)
+    .all()
 }
 
 export async function getLinksByStatus(status: (typeof linksTable.status.enumValues)[number]) {

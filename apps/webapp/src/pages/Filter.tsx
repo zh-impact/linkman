@@ -9,16 +9,182 @@ import {
   Grid,
   Group,
   Loader,
+  NumberInput,
+  Radio,
   Stack,
-  Switch,
   Tabs,
   Text,
   Title,
 } from '@mantine/core'
-import { useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
+
+const VIRTUAL_THRESHOLD = 20
+const INNER_VIRTUAL_THRESHOLD = 20
+const ROW_HEIGHT = 20
+
+function VirtualUrlList({ urls }: { urls: string[] }) {
+  const parentRef = useRef<HTMLDivElement>(null)
+  const virtualizer = useVirtualizer({
+    count: urls.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 10,
+  })
+
+  return (
+    <Box
+      ref={parentRef}
+      mah={300}
+      style={{ overflowY: 'auto' }}
+    >
+      <Box style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        {virtualizer.getVirtualItems().map((item) => {
+          const url = urls[item.index]
+          return (
+            <Box
+              key={item.key}
+              ref={(el) => {
+                if (el) virtualizer.measureElement(el)
+              }}
+              data-index={item.index}
+              style={{
+                position: 'absolute',
+                top: item.start,
+                left: 0,
+                right: 0,
+              }}
+            >
+              <Text
+                component="a"
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                c={item.index === 0 ? 'green' : 'blue'}
+                td="underline"
+                size="xs"
+                ff="monospace"
+                pl="xs"
+                style={{ display: 'block', wordBreak: 'break-all', lineHeight: '1.4' }}
+              >
+                {item.index === 0 ? '[KEEP] ' : `[${item.index + 1}]  `}
+                {url}
+              </Text>
+            </Box>
+          )
+        })}
+      </Box>
+    </Box>
+  )
+}
+
+function SimilarGroupCard({
+  group,
+  index,
+  expanded,
+  selected,
+  onToggleExpand,
+  onToggleSelect,
+}: {
+  group: {
+    groupKey: string
+    method: string
+    linkIds: string[]
+    urls: string[]
+    count: number
+  }
+  index: number
+  expanded: boolean
+  selected: boolean
+  onToggleExpand: () => void
+  onToggleSelect: () => void
+}) {
+  const useInnerVirtual = expanded && group.urls.length > INNER_VIRTUAL_THRESHOLD
+
+  return (
+    <Card
+      withBorder
+      p="xs"
+      bg={
+        selected
+          ? 'var(--mantine-color-blue-light)'
+          : expanded
+            ? 'var(--mantine-color-violet-light)'
+            : 'var(--mantine-color-gray-light)'
+      }
+    >
+      <Group justify="space-between" onClick={onToggleExpand} style={{ cursor: 'pointer' }}>
+        <Group gap="xs">
+          <Checkbox
+            checked={selected}
+            onChange={(e) => {
+              e.stopPropagation()
+              onToggleSelect()
+            }}
+          />
+          <Badge size="sm" variant="light">
+            {group.method}
+          </Badge>
+          <Badge
+            color={
+              group.count >= 10
+                ? 'red'
+                : group.count >= 5
+                  ? 'orange'
+                  : group.count >= 3
+                    ? 'yellow'
+                    : 'gray'
+            }
+            size="sm"
+          >
+            {group.count} links
+          </Badge>
+        </Group>
+        <Group gap="xs">
+          <Text size="xs" c="dimmed" truncate maw={300}>
+            {group.groupKey}
+          </Text>
+        </Group>
+      </Group>
+      {expanded && (
+        <Box
+          mt="xs"
+          pt="xs"
+          style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {useInnerVirtual ? (
+            <VirtualUrlList urls={group.urls} />
+          ) : (
+            <Stack gap={2}>
+              {group.urls.map((url, j) => (
+                <Text key={j} size="xs" ff="monospace" style={{ wordBreak: 'break-all' }}>
+                  <Text
+                    component="a"
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    c={j === 0 ? 'green' : 'blue'}
+                    td="underline"
+                    size="xs"
+                    span
+                    ff="monospace"
+                  >
+                    {j === 0 ? '[KEEP] ' : `[${j + 1}]  `}
+                    {url}
+                  </Text>
+                </Text>
+              ))}
+            </Stack>
+          )}
+        </Box>
+      )}
+    </Card>
+  )
+}
 
 export function FilterPage() {
   return (
@@ -175,24 +341,30 @@ function InternalFilter() {
 }
 
 function SimilarFilter() {
-  const [strategy, setStrategy] = useState({
-    byDomain: true,
-    byPathPrefix: true,
-    byPathDepth: 2,
-    editDistance: false,
-    editDistanceThreshold: 0.8,
-  })
+  const [method, setMethod] = useState<'domain' | 'path_prefix' | 'edit_distance'>('domain')
+  const [pathDepth, setPathDepth] = useState(2)
+  const [editDistanceThreshold, setEditDistanceThreshold] = useState(0.8)
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
   const [executing, setExecuting] = useState(false)
   const [preview, setPreview] = useState<{
     groupCount: number
     totalSimilar: number
-    groups: Array<{ groupKey: string; method: string; linkIds: string[]; count: number }>
+    groups: Array<{ groupKey: string; method: string; linkIds: string[]; urls: string[]; count: number }>
   } | null>(null)
   const [result, setResult] = useState<{ filteredCount: number; operationId: string } | null>(null)
   const [error, setError] = useState('')
   const confirmDlg = useConfirm()
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const strategy = {
+    byDomain: method === 'domain',
+    byPathPrefix: method === 'path_prefix',
+    byPathDepth: pathDepth,
+    editDistance: method === 'edit_distance',
+    editDistanceThreshold,
+  }
 
   const handlePreview = async () => {
     setLoading(true)
@@ -200,6 +372,7 @@ function SimilarFilter() {
     setPreview(null)
     setResult(null)
     setSelectedGroups(new Set())
+    setExpandedGroups(new Set())
     try {
       const data = await trpc.filter.similar.preview.query({ strategy })
       setPreview(data)
@@ -222,6 +395,7 @@ function SimilarFilter() {
       setResult(data)
       setPreview(null)
       setSelectedGroups(new Set())
+      setExpandedGroups(new Set())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Execution request failed')
     } finally {
@@ -229,11 +403,20 @@ function SimilarFilter() {
     }
   }
 
-  const toggleGroup = (key: string) => {
+  const toggleGroupSelect = (key: string) => {
     setSelectedGroups((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
+      return next
+    })
+  }
+
+  const toggleGroupExpand = (index: number) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
       return next
     })
   }
@@ -247,6 +430,25 @@ function SimilarFilter() {
       setSelectedGroups(new Set(preview.groups.map((g) => g.groupKey)))
     }
   }
+
+  const useVirtual = (preview?.groups.length ?? 0) > VIRTUAL_THRESHOLD
+
+  const virtualizer = useVirtualizer({
+    count: preview?.groups.length ?? 0,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => {
+      if (!preview) return 52
+      const group = preview.groups[index]
+      const base = 52
+      if (expandedGroups.has(index)) {
+        const innerVirtual = group.urls.length > INNER_VIRTUAL_THRESHOLD
+        const contentHeight = innerVirtual ? 300 : group.urls.length * ROW_HEIGHT
+        return base + 28 + contentHeight
+      }
+      return base
+    },
+    overscan: 5,
+  })
 
   return (
     <>
@@ -270,42 +472,42 @@ function SimilarFilter() {
             Preview to see groups, then select which to filter.
           </Text>
           <Stack>
-            <Switch
-              label="Group by domain"
-              checked={strategy.byDomain}
-              onChange={(e) => setStrategy({ ...strategy, byDomain: e.currentTarget.checked })}
-            />
-            <Group>
-              <Switch
-                label="Group by path prefix"
-                checked={strategy.byPathPrefix}
-                onChange={(e) =>
-                  setStrategy({ ...strategy, byPathPrefix: e.currentTarget.checked })
-                }
-              />
-              {strategy.byPathPrefix && (
-                <Box>
-                  <Text size="xs" c="dimmed">
-                    Depth
-                  </Text>
-                  <Badge size="lg">{strategy.byPathDepth}</Badge>
-                </Box>
-              )}
-            </Group>
-            <Group>
-              <Switch
-                label="Edit distance"
-                checked={strategy.editDistance}
-                onChange={(e) =>
-                  setStrategy({ ...strategy, editDistance: e.currentTarget.checked })
-                }
-              />
-              {strategy.editDistance && (
-                <Text size="xs" c="dimmed">
-                  Threshold: {strategy.editDistanceThreshold}
-                </Text>
-              )}
-            </Group>
+            <Radio.Group value={method} onChange={(v) => setMethod(v as typeof method)}>
+              <Stack gap="xs">
+                <Radio value="domain" label="Group by domain" />
+                <Group align="center" gap="sm">
+                  <Radio value="path_prefix" label="Group by path prefix" />
+                  {method === 'path_prefix' && (
+                    <>
+                      <Text size="sm" fw={500} ml="xs">
+                        Depth
+                      </Text>
+                      <NumberInput
+                        value={pathDepth}
+                        onChange={(v) => setPathDepth(typeof v === 'number' ? v : 2)}
+                        min={1}
+                        max={10}
+                        w={70}
+                      />
+                    </>
+                  )}
+                </Group>
+                <Group align="center" gap="sm">
+                  <Radio value="edit_distance" label="Edit distance" />
+                  {method === 'edit_distance' && (
+                    <NumberInput
+                      value={editDistanceThreshold}
+                      onChange={(v) => setEditDistanceThreshold(typeof v === 'number' ? v : 0.8)}
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      decimalScale={2}
+                      w={80}
+                    />
+                  )}
+                </Group>
+              </Stack>
+            </Radio.Group>
 
             <Group>
               <Button onClick={handlePreview} loading={loading}>
@@ -348,7 +550,7 @@ function SimilarFilter() {
             {preview.groups.length > 0 && (
               <Card withBorder>
                 <Group justify="space-between" mb="sm">
-                  <Text fw={600}>Groups</Text>
+                  <Text fw={600}>Groups ({preview.groups.length})</Text>
                   <Checkbox
                     label="Select All"
                     checked={allSelected}
@@ -356,44 +558,53 @@ function SimilarFilter() {
                     size="xs"
                   />
                 </Group>
-                <Box mah={400} style={{ overflowY: 'auto' }}>
-                <Stack gap="xs">
-                  {preview.groups.map((group) => (
-                    <Card
-                      key={group.groupKey}
-                      withBorder
-                      p="xs"
-                      bg={
-                        selectedGroups.has(group.groupKey)
-                          ? 'var(--mantine-color-blue-light)'
-                          : undefined
-                      }
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => toggleGroup(group.groupKey)}
-                    >
-                      <Group justify="space-between">
-                        <Group gap="xs">
-                          <Checkbox
-                            checked={selectedGroups.has(group.groupKey)}
-                            onChange={() => toggleGroup(group.groupKey)}
+                {useVirtual ? (
+                  <Box ref={scrollRef} mah={400} style={{ overflowY: 'auto' }}>
+                    <Box style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+                      {virtualizer.getVirtualItems().map((item) => (
+                        <Box
+                          key={item.key}
+                          ref={(el) => {
+                            if (el) virtualizer.measureElement(el)
+                          }}
+                          data-index={item.index}
+                          style={{
+                            position: 'absolute',
+                            top: item.start,
+                            left: 0,
+                            right: 0,
+                          }}
+                          pb="xs"
+                        >
+                          <SimilarGroupCard
+                            group={preview.groups[item.index]}
+                            index={item.index}
+                            expanded={expandedGroups.has(item.index)}
+                            selected={selectedGroups.has(preview.groups[item.index].groupKey)}
+                            onToggleExpand={() => toggleGroupExpand(item.index)}
+                            onToggleSelect={() => toggleGroupSelect(preview.groups[item.index].groupKey)}
                           />
-                          <Badge size="sm" variant="light">
-                            {group.method}
-                          </Badge>
-                          <Text size="xs" fw={500}>
-                            {group.count} links
-                          </Text>
-                        </Group>
-                        <Group gap="xs">
-                          <Text size="xs" c="dimmed" truncate>
-                            {group.groupKey}
-                          </Text>
-                        </Group>
-                      </Group>
-                    </Card>
-                  ))}
-                </Stack>
-                </Box>
+                        </Box>
+                      ))}
+                    </Box>
+                  </Box>
+                ) : (
+                  <Box mah={400} style={{ overflowY: 'auto' }}>
+                    <Stack gap="xs">
+                      {preview.groups.map((group, i) => (
+                        <SimilarGroupCard
+                          key={group.groupKey}
+                          group={group}
+                          index={i}
+                          expanded={expandedGroups.has(i)}
+                          selected={selectedGroups.has(group.groupKey)}
+                          onToggleExpand={() => toggleGroupExpand(i)}
+                          onToggleSelect={() => toggleGroupSelect(group.groupKey)}
+                        />
+                      ))}
+                    </Stack>
+                  </Box>
+                )}
 
                 <Group justify="space-between" mt="sm">
                   <Text size="sm" c="dimmed">

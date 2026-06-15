@@ -1,8 +1,5 @@
-import { eq } from 'drizzle-orm'
 import { z } from 'zod'
-import { db } from '../lib/db/client'
-import { linksTable } from '../lib/db/schema'
-import { getAllLinks } from '../lib/db/queries'
+import { type AnalysisLink, getActiveLinksForAnalysis, updateLinksStatusByIds } from '../lib/db/queries'
 import { logOperation } from '../lib/log'
 import { normalizeUrl } from '../lib/url/normalize'
 import { publicProcedure, router } from '../trpc'
@@ -41,7 +38,7 @@ function getNormalizeUrl(strategy: string, normalizeConfig: z.infer<typeof norma
   }
 }
 
-function findDuplicateGroups(allLinks: Awaited<ReturnType<typeof getAllLinks>>, normalize: (url: string) => string) {
+function findDuplicateGroups(allLinks: AnalysisLink[], normalize: (url: string) => string) {
   const linkMap = new Map<string, { id: string; url: string }>()
   const normalizedMap = new Map<string, string[]>()
   for (const link of allLinks) {
@@ -89,9 +86,7 @@ export const deduplicateRouter = router({
     )
     .query(async ({ input }) => {
       const { strategy, sort, normalizeConfig } = input
-      const allLinks = (await getAllLinks()).filter(
-        (l) => l.status !== 'duplicate_removed' && l.status !== 'filtered_internal' && l.status !== 'filtered_similar',
-      )
+      const allLinks = await getActiveLinksForAnalysis()
 
       if (sort === 'alphabetical') {
         allLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))
@@ -119,9 +114,7 @@ export const deduplicateRouter = router({
     )
     .mutation(async ({ input }) => {
       const { strategy, sort, normalizeConfig } = input
-      const allLinks = (await getAllLinks()).filter(
-        (l) => l.status !== 'duplicate_removed' && l.status !== 'filtered_internal' && l.status !== 'filtered_similar',
-      )
+      const allLinks = await getActiveLinksForAnalysis()
 
       if (sort === 'alphabetical') {
         allLinks.sort((a, b) => a.originalUrl.localeCompare(b.originalUrl))
@@ -133,13 +126,10 @@ export const deduplicateRouter = router({
       const { groups, duplicateCount } = findDuplicateGroups(allLinks, normalize)
 
       for (const group of groups) {
-        for (const dupId of group.duplicateIds) {
-          await db
-            .update(linksTable)
-            .set({ status: 'duplicate_removed', duplicateOf: group.keepId })
-            .where(eq(linksTable.id, dupId))
-            .run()
-        }
+        await updateLinksStatusByIds(group.duplicateIds, {
+          status: 'duplicate_removed',
+          duplicateOf: group.keepId,
+        })
       }
 
       await logOperation(

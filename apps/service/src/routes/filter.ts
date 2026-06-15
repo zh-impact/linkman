@@ -1,8 +1,5 @@
-import { eq } from 'drizzle-orm'
 import { z } from 'zod'
-import { db } from '../lib/db/client'
-import { linksTable } from '../lib/db/schema'
-import { getAllLinks, getLinksByIds } from '../lib/db/queries'
+import { getAllLinks, getActiveLinksForAnalysis, getLinksByIds, updateLinksStatusByIds } from '../lib/db/queries'
 import { captureBeforeState, diffLinks, logOperation } from '../lib/log'
 import { detectSimilarity, type SimilarityLayer } from '../lib/similarity'
 import { isInternalUrl } from '../lib/url/internal'
@@ -21,7 +18,7 @@ export const filterRouter = router({
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
-          targetLinks = (await getAllLinks()).filter((l) => l.status !== 'filtered_internal')
+          targetLinks = await getActiveLinksForAnalysis()
         }
 
         const filteredIds: string[] = []
@@ -49,7 +46,7 @@ export const filterRouter = router({
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
-          targetLinks = (await getAllLinks()).filter((l) => l.status !== 'filtered_internal')
+          targetLinks = await getActiveLinksForAnalysis()
         }
 
         const filteredIds: string[] = []
@@ -67,13 +64,10 @@ export const filterRouter = router({
 
         const before = await captureBeforeState()
 
-        for (const linkId of filteredIds) {
-          await db
-            .update(linksTable)
-            .set({ status: 'filtered_internal', isInternal: true })
-            .where(eq(linksTable.id, linkId))
-            .run()
-        }
+        await updateLinksStatusByIds(filteredIds, {
+          status: 'filtered_internal',
+          isInternal: true,
+        })
 
         const linksAfter = await getAllLinks()
         const changes = diffLinks(
@@ -128,7 +122,7 @@ export const filterRouter = router({
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
-          targetLinks = await getAllLinks()
+          targetLinks = await getActiveLinksForAnalysis()
         }
 
         const layers: SimilarityLayer[] = []
@@ -151,6 +145,12 @@ export const filterRouter = router({
 
         const totalSimilar = groups.reduce((sum, g) => sum + Math.max(0, g.linkIds.length - 1), 0)
 
+        // Build link id -> url map for group detail lookup
+        const linkMap = new Map<string, string>()
+        for (const link of targetLinks) {
+          linkMap.set(link.id, link.originalUrl)
+        }
+
         return {
           groupCount: groups.length,
           totalSimilar,
@@ -158,6 +158,7 @@ export const filterRouter = router({
             groupKey: g.groupKey,
             method: g.method,
             linkIds: g.linkIds,
+            urls: g.linkIds.map((id) => linkMap.get(id) ?? ''),
             count: g.linkIds.length,
           })),
         }
@@ -190,7 +191,7 @@ export const filterRouter = router({
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
-          targetLinks = await getAllLinks()
+          targetLinks = await getActiveLinksForAnalysis()
         }
 
         const layers: SimilarityLayer[] = []
@@ -220,24 +221,14 @@ export const filterRouter = router({
         for (const group of groupsToApply) {
           const [keepId, ...duplicateIds] = group.linkIds
 
-          for (const dupId of duplicateIds) {
-            await db
-              .update(linksTable)
-              .set({
-                status: 'filtered_similar',
-                similarityGroup: group.groupKey,
-                duplicateOf: keepId,
-              })
-              .where(eq(linksTable.id, dupId))
-              .run()
-            filteredCount++
-          }
+          await updateLinksStatusByIds(duplicateIds, {
+            status: 'filtered_similar',
+            similarityGroup: group.groupKey,
+            duplicateOf: keepId,
+          })
+          filteredCount += duplicateIds.length
 
-          await db
-            .update(linksTable)
-            .set({ similarityGroup: group.groupKey })
-            .where(eq(linksTable.id, keepId))
-            .run()
+          await updateLinksStatusByIds([keepId], { similarityGroup: group.groupKey })
         }
 
         const linksAfter = await getAllLinks()

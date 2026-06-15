@@ -45,14 +45,10 @@ export async function generateSnapshotHash(): Promise<SnapshotHash> {
 /** Create a full snapshot record in the database. */
 export async function createFullSnapshot(): Promise<string> {
   const links = await getAllLinks()
-  const linkIds = links.map((l) => l.id)
 
-  const allHashes = linkIds
+  const allHashes = links
+    .map((l) => `${l.id}:${hashLinkState(l)}`)
     .sort()
-    .map((id) => {
-      const link = links.find((l) => l.id === id)!
-      return `${id}:${hashLinkState(link)}`
-    })
     .join('|')
 
   const checksum = createHash('sha256').update(allHashes).digest('hex')
@@ -60,7 +56,7 @@ export async function createFullSnapshot(): Promise<string> {
   const snapshotId = uuidv4()
   await insertSnapshot({
     id: snapshotId,
-    linkIds: JSON.stringify(linkIds),
+    linkIds: JSON.stringify(links.map((l) => l.id)),
     checksum,
   })
 
