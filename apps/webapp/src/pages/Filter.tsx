@@ -348,11 +348,11 @@ function SimilarFilter() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(false)
   const [executing, setExecuting] = useState(false)
-  const [preview, setPreview] = useState<{
-    groupCount: number
-    totalSimilar: number
-    groups: Array<{ groupKey: string; method: string; linkIds: string[]; urls: string[]; count: number }>
-  } | null>(null)
+  const [groups, setGroups] = useState<
+    Array<{ groupKey: string; method: string; linkIds: string[]; urls: string[]; count: number }>
+  >([])
+  const [totalSimilar, setTotalSimilar] = useState(0)
+  const [progress, setProgress] = useState<{ processed: number; total: number } | null>(null)
   const [result, setResult] = useState<{ filteredCount: number; operationId: string } | null>(null)
   const [error, setError] = useState('')
   const confirmDlg = useConfirm()
@@ -369,13 +369,28 @@ function SimilarFilter() {
   const handlePreview = async () => {
     setLoading(true)
     setError('')
-    setPreview(null)
+    setGroups([])
+    setTotalSimilar(0)
+    setProgress(null)
     setResult(null)
     setSelectedGroups(new Set())
     setExpandedGroups(new Set())
     try {
-      const data = await trpc.filter.similar.preview.query({ strategy })
-      setPreview(data)
+      let cursor = 0
+      let accumulatedSimilar = 0
+      while (true) {
+        const data = await trpc.filter.similar.preview.query({ strategy, cursor })
+        setGroups((prev) => [...prev, ...data.groups])
+        accumulatedSimilar += data.totalSimilar
+        setTotalSimilar(accumulatedSimilar)
+        if (data.hasMore) {
+          setProgress({ processed: data.processedDomains, total: data.totalDomains })
+          cursor = data.nextCursor!
+        } else {
+          setProgress(null)
+          break
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Preview request failed')
     } finally {
@@ -393,7 +408,9 @@ function SimilarFilter() {
         selectedGroups: Array.from(selectedGroups),
       })
       setResult(data)
-      setPreview(null)
+      setGroups([])
+      setTotalSimilar(0)
+      setProgress(null)
       setSelectedGroups(new Set())
       setExpandedGroups(new Set())
     } catch (err) {
@@ -421,24 +438,23 @@ function SimilarFilter() {
     })
   }
 
-  const allSelected = preview ? selectedGroups.size === preview.groups.length : false
+  const allSelected = groups.length > 0 && selectedGroups.size === groups.length
   const toggleAllGroups = () => {
-    if (!preview) return
+    if (groups.length === 0) return
     if (allSelected) {
       setSelectedGroups(new Set())
     } else {
-      setSelectedGroups(new Set(preview.groups.map((g) => g.groupKey)))
+      setSelectedGroups(new Set(groups.map((g) => g.groupKey)))
     }
   }
 
-  const useVirtual = (preview?.groups.length ?? 0) > VIRTUAL_THRESHOLD
+  const useVirtual = groups.length > VIRTUAL_THRESHOLD
 
   const virtualizer = useVirtualizer({
-    count: preview?.groups.length ?? 0,
+    count: groups.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => {
-      if (!preview) return 52
-      const group = preview.groups[index]
+      const group = groups[index]
       const base = 52
       if (expandedGroups.has(index)) {
         const innerVirtual = group.urls.length > INNER_VIRTUAL_THRESHOLD
@@ -517,7 +533,7 @@ function SimilarFilter() {
           </Stack>
         </Card>
 
-        {preview && (
+        {(groups.length > 0 || loading) && (
           <Stack gap="md">
             <Card withBorder>
               <Text fw={600} mb="sm">
@@ -530,7 +546,7 @@ function SimilarFilter() {
                       Similar Groups
                     </Text>
                     <Text fw={700} size="xl" c="violet">
-                      {preview.groupCount}
+                      {groups.length}
                     </Text>
                   </Card>
                 </Grid.Col>
@@ -540,17 +556,22 @@ function SimilarFilter() {
                       Links Involved
                     </Text>
                     <Text fw={700} size="xl" c="yellow">
-                      {preview.totalSimilar}
+                      {totalSimilar}
                     </Text>
                   </Card>
                 </Grid.Col>
               </Grid>
+              {progress && (
+                <Text size="xs" c="dimmed" mt="sm">
+                  Processing domains: {progress.processed} / {progress.total}
+                </Text>
+              )}
             </Card>
 
-            {preview.groups.length > 0 && (
+            {groups.length > 0 && (
               <Card withBorder>
                 <Group justify="space-between" mb="sm">
-                  <Text fw={600}>Groups ({preview.groups.length})</Text>
+                  <Text fw={600}>Groups ({groups.length})</Text>
                   <Checkbox
                     label="Select All"
                     checked={allSelected}
@@ -577,12 +598,12 @@ function SimilarFilter() {
                           pb="xs"
                         >
                           <SimilarGroupCard
-                            group={preview.groups[item.index]}
+                            group={groups[item.index]}
                             index={item.index}
                             expanded={expandedGroups.has(item.index)}
-                            selected={selectedGroups.has(preview.groups[item.index].groupKey)}
+                            selected={selectedGroups.has(groups[item.index].groupKey)}
                             onToggleExpand={() => toggleGroupExpand(item.index)}
-                            onToggleSelect={() => toggleGroupSelect(preview.groups[item.index].groupKey)}
+                            onToggleSelect={() => toggleGroupSelect(groups[item.index].groupKey)}
                           />
                         </Box>
                       ))}
@@ -591,7 +612,7 @@ function SimilarFilter() {
                 ) : (
                   <Box mah={400} style={{ overflowY: 'auto' }}>
                     <Stack gap="xs">
-                      {preview.groups.map((group, i) => (
+                      {groups.map((group, i) => (
                         <SimilarGroupCard
                           key={group.groupKey}
                           group={group}
@@ -608,7 +629,7 @@ function SimilarFilter() {
 
                 <Group justify="space-between" mt="sm">
                   <Text size="sm" c="dimmed">
-                    {selectedGroups.size} / {preview.groups.length} groups selected
+                    {selectedGroups.size} / {groups.length} groups selected
                   </Text>
                   <Button
                     color="red"

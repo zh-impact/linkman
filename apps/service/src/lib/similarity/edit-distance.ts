@@ -1,35 +1,55 @@
 /**
- * Compute Levenshtein edit distance between two strings.
+ * Check if two strings are similar enough based on edit distance threshold.
+ * Uses single-row DP with early termination and length pre-filter for performance.
+ *
+ * @returns true if similarityRatio(a, b) >= threshold
  */
-export function levenshteinDistance(a: string, b: string): number {
-  const m = a.length
-  const n = b.length
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0) as number[])
+export function isSimilarEnough(a: string, b: string, threshold: number): boolean {
+  if (a === b) return true
+  const lenA = a.length
+  const lenB = b.length
+  const maxLen = Math.max(lenA, lenB)
+  if (maxLen === 0) return true
 
-  for (let i = 0; i <= m; i++) dp[i][0] = i
-  for (let j = 0; j <= n; j++) dp[0][j] = j
+  // Length pre-filter: edit distance >= |lenA - lenB|
+  // similarity = 1 - dist/maxLen >= threshold  =>  dist <= (1-threshold)*maxLen
+  const maxAllowedDist = Math.floor((1 - threshold) * maxLen)
+  if (Math.abs(lenA - lenB) > maxAllowedDist) return false
 
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1, // deletion
-        dp[i][j - 1] + 1, // insertion
-        dp[i - 1][j - 1] + cost, // substitution
-      )
+  // Single-row DP: iterate over the shorter string to minimize inner loop
+  const shortStr = lenA <= lenB ? a : b
+  const longStr = lenA <= lenB ? b : a
+  const shortLen = shortStr.length
+  const longLen = longStr.length
+
+  let prev = new Array<number>(shortLen + 1)
+  let curr = new Array<number>(shortLen + 1)
+
+  for (let j = 0; j <= shortLen; j++) prev[j] = j
+
+  for (let i = 1; i <= longLen; i++) {
+    curr[0] = i
+    let rowMin = curr[0]
+
+    for (let j = 1; j <= shortLen; j++) {
+      const cost = longStr.charCodeAt(i - 1) === shortStr.charCodeAt(j - 1) ? 0 : 1
+      const del = prev[j] + 1
+      const ins = curr[j - 1] + 1
+      const sub = prev[j - 1] + cost
+      let best = del < ins ? del : ins
+      if (sub < best) best = sub
+      curr[j] = best
+      if (best < rowMin) rowMin = best
     }
+
+    // Early termination: if minimum value in this row exceeds threshold, no match
+    if (rowMin > maxAllowedDist) return false
+
+    const tmp = prev
+    prev = curr
+    curr = tmp
   }
 
-  return dp[m][n]
-}
-
-/**
- * Compute similarity ratio between 0 and 1 based on edit distance.
- * 1 = identical, 0 = completely different.
- */
-export function similarityRatio(a: string, b: string): number {
-  if (a === b) return 1
-  const maxLen = Math.max(a.length, b.length)
-  if (maxLen === 0) return 1
-  return 1 - levenshteinDistance(a, b) / maxLen
+  const dist = prev[shortLen]
+  return 1 - dist / maxLen >= threshold
 }

@@ -1,7 +1,12 @@
 import { z } from 'zod'
 import { getAllLinks, getActiveLinksForAnalysis, getLinksByIds, updateLinksStatusByIds } from '../lib/db/queries'
 import { captureBeforeState, diffLinks, logOperation } from '../lib/log'
-import { detectSimilarity, type SimilarityLayer } from '../lib/similarity'
+import {
+  buildDomainBuckets,
+  detectEditDistanceInDomain,
+  detectSimilarity,
+  type SimilarityLayer,
+} from '../lib/similarity'
 import { isInternalUrl } from '../lib/url/internal'
 import { publicProcedure, router } from '../trpc'
 
@@ -115,6 +120,8 @@ export const filterRouter = router({
               editDistance: false,
               editDistanceThreshold: 0.8,
             }),
+          cursor: z.number().min(0).default(0),
+          batchSize: z.number().min(1).max(500).default(50),
         }),
       )
       .query(async ({ input }) => {
@@ -125,6 +132,55 @@ export const filterRouter = router({
           targetLinks = await getActiveLinksForAnalysis()
         }
 
+        const isEditDistance =
+          input.strategy.editDistance && !input.strategy.byDomain && !input.strategy.byPathPrefix
+
+        // Build link id -> url map for group detail lookup
+        const linkMap = new Map<string, string>()
+        for (const link of targetLinks) {
+          linkMap.set(link.id, link.originalUrl)
+        }
+
+        const mapGroup = (g: { groupKey: string; method: string; linkIds: string[] }) => ({
+          groupKey: g.groupKey,
+          method: g.method,
+          linkIds: g.linkIds,
+          urls: g.linkIds.map((id) => linkMap.get(id) ?? ''),
+          count: g.linkIds.length,
+        })
+
+        // --- Edit distance: paginated by domain ---
+        if (isEditDistance) {
+          const threshold = input.strategy.editDistanceThreshold
+          const domainBuckets = buildDomainBuckets(targetLinks)
+
+          const totalDomains = domainBuckets.length
+          const start = input.cursor
+          const end = Math.min(start + input.batchSize, totalDomains)
+
+          const batchGroups: Array<{ groupKey: string; method: string; linkIds: string[] }> = []
+          for (let i = start; i < end; i++) {
+            const domainGroups = await detectEditDistanceInDomain(domainBuckets[i].links, threshold)
+            batchGroups.push(...domainGroups)
+          }
+
+          const totalSimilar = batchGroups.reduce(
+            (sum, g) => sum + Math.max(0, g.linkIds.length - 1),
+            0,
+          )
+
+          return {
+            groupCount: batchGroups.length,
+            totalSimilar,
+            groups: batchGroups.map(mapGroup),
+            processedDomains: end,
+            totalDomains,
+            hasMore: end < totalDomains,
+            nextCursor: end < totalDomains ? end : null,
+          }
+        }
+
+        // --- Domain / path_prefix: single-shot ---
         const layers: SimilarityLayer[] = []
         if (input.strategy.byDomain) {
           layers.push({ method: 'domain' })
@@ -135,32 +191,22 @@ export const filterRouter = router({
         if (input.strategy.editDistance) {
           layers.push({ method: 'edit_distance', threshold: input.strategy.editDistanceThreshold })
         }
-
         if (layers.length === 0) {
           layers.push({ method: 'domain' })
           layers.push({ method: 'path_prefix', pathDepth: 2 })
         }
 
-        const groups = detectSimilarity(targetLinks, layers)
-
+        const groups = await detectSimilarity(targetLinks, layers)
         const totalSimilar = groups.reduce((sum, g) => sum + Math.max(0, g.linkIds.length - 1), 0)
-
-        // Build link id -> url map for group detail lookup
-        const linkMap = new Map<string, string>()
-        for (const link of targetLinks) {
-          linkMap.set(link.id, link.originalUrl)
-        }
 
         return {
           groupCount: groups.length,
           totalSimilar,
-          groups: groups.map((g) => ({
-            groupKey: g.groupKey,
-            method: g.method,
-            linkIds: g.linkIds,
-            urls: g.linkIds.map((id) => linkMap.get(id) ?? ''),
-            count: g.linkIds.length,
-          })),
+          groups: groups.map(mapGroup),
+          processedDomains: 0,
+          totalDomains: 0,
+          hasMore: false,
+          nextCursor: null,
         }
       }),
 
@@ -210,7 +256,7 @@ export const filterRouter = router({
           layers.push({ method: 'path_prefix', pathDepth: 2 })
         }
 
-        const groups = detectSimilarity(targetLinks, layers)
+        const groups = await detectSimilarity(targetLinks, layers)
         const groupsToApply = input.selectedGroups
           ? groups.filter((g) => input.selectedGroups!.includes(g.groupKey))
           : groups
