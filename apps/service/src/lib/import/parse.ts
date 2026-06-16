@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid'
-import { linksTable } from '../db/schema'
 import type { NormalizeConfig } from '../../types'
+import type { linksTable } from '../db/schema'
 import { extractDomain, normalizeUrl } from '../url/normalize'
 import { validateUrls } from '../url/validate'
 

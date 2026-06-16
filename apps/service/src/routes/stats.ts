@@ -14,10 +14,7 @@ export const statsRouter = router({
       .groupBy(linksTable.status)
       .all()
 
-    const totalResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(linksTable)
-      .get()
+    const totalResult = await db.select({ count: sql<number>`count(*)` }).from(linksTable).get()
 
     const total = totalResult?.count ?? 0
 

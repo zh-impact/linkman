@@ -35,9 +35,7 @@ export async function detectEditDistanceInDomain(
   if (domainLinks.length < 2) return []
 
   // Sort by normalizedUrl so similar URLs cluster together
-  const sorted = [...domainLinks].sort((a, b) =>
-    a.normalizedUrl.localeCompare(b.normalizedUrl),
-  )
+  const sorted = [...domainLinks].sort((a, b) => a.normalizedUrl.localeCompare(b.normalizedUrl))
 
   // Window size: larger window catches more pairs but costs more.
   // Cap at 200 — URLs with ≥80% similarity will be within this range when sorted.
@@ -83,7 +81,9 @@ export async function detectEditDistanceInDomain(
  * Build domain buckets for edit-distance pagination.
  * Returns domains sorted by size ascending (small domains first for quick initial response).
  */
-export function buildDomainBuckets(links: LinkLike[]): Array<{ domain: string; links: LinkLike[] }> {
+export function buildDomainBuckets(
+  links: LinkLike[],
+): Array<{ domain: string; links: LinkLike[] }> {
   const domainMap = new Map<string, LinkLike[]>()
   for (const link of links) {
     const bucket = domainMap.get(link.domain)

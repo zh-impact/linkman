@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { getAllLinks, getActiveLinksForAnalysis, getLinksByIds, updateLinksStatusByIds } from '../lib/db/queries'
+import {
+  type AnalysisLink,
+  getActiveLinksForAnalysis,
+  getAllLinks,
+  getLinksByIds,
+  updateLinksStatusByIds,
+} from '../lib/db/queries'
 import { captureBeforeState, diffLinks, logOperation } from '../lib/log'
 import {
   buildDomainBuckets,
@@ -19,7 +25,7 @@ export const filterRouter = router({
         }),
       )
       .query(async ({ input }) => {
-        let targetLinks
+        let targetLinks: AnalysisLink[]
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
@@ -47,7 +53,7 @@ export const filterRouter = router({
         }),
       )
       .mutation(async ({ input }) => {
-        let targetLinks
+        let targetLinks: AnalysisLink[]
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
@@ -125,7 +131,7 @@ export const filterRouter = router({
         }),
       )
       .query(async ({ input }) => {
-        let targetLinks
+        let targetLinks: AnalysisLink[]
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
@@ -233,7 +239,7 @@ export const filterRouter = router({
         }),
       )
       .mutation(async ({ input }) => {
-        let targetLinks
+        let targetLinks: AnalysisLink[]
         if (input.linkIds?.length) {
           targetLinks = await getLinksByIds(input.linkIds)
         } else {
@@ -257,8 +263,9 @@ export const filterRouter = router({
         }
 
         const groups = await detectSimilarity(targetLinks, layers)
-        const groupsToApply = input.selectedGroups
-          ? groups.filter((g) => input.selectedGroups!.includes(g.groupKey))
+        const selectedGroups = input.selectedGroups
+        const groupsToApply = selectedGroups
+          ? groups.filter((g) => selectedGroups.includes(g.groupKey))
           : groups
 
         const before = await captureBeforeState()

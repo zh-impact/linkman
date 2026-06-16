@@ -3,8 +3,8 @@ import {
   deleteLinksByIds,
   getAllLinkIds,
   getLinkById,
-  getLinksByStatus,
   getLinksByIds,
+  getLinksByStatus,
   getLinksByStatusPaginated,
   getLinksCount,
   getLinksCountByStatus,
@@ -91,7 +91,11 @@ export const linksRouter = router({
       await updateLink(input.id, input.data)
       const updated = await getLinkById(input.id)
       await logOperation(
-        { type: 'manual_tag', changes: { added: [], removed: [], modified: [{ id: input.id, changes: {} }] }, stats: { inputCount: 1, outputCount: 1, errorCount: 0 } },
+        {
+          type: 'manual_tag',
+          changes: { added: [], removed: [], modified: [{ id: input.id, changes: {} }] },
+          stats: { inputCount: 1, outputCount: 1, errorCount: 0 },
+        },
         '',
       )
       return updated
@@ -100,7 +104,11 @@ export const linksRouter = router({
   delete: publicProcedure.input(z.string()).mutation(async ({ input: id }) => {
     await deleteLinksByIds([id])
     await logOperation(
-      { type: 'manual_delete', changes: { added: [], removed: [id], modified: [] }, stats: { inputCount: 1, outputCount: 0, errorCount: 0 } },
+      {
+        type: 'manual_delete',
+        changes: { added: [], removed: [id], modified: [] },
+        stats: { inputCount: 1, outputCount: 0, errorCount: 0 },
+      },
       '',
     )
     return { success: true }
@@ -112,7 +120,11 @@ export const linksRouter = router({
       const ids = input.ids
       await deleteLinksByIds(ids)
       await logOperation(
-        { type: 'manual_delete', changes: { added: [], removed: ids, modified: [] }, stats: { inputCount: ids.length, outputCount: 0, errorCount: 0 } },
+        {
+          type: 'manual_delete',
+          changes: { added: [], removed: ids, modified: [] },
+          stats: { inputCount: ids.length, outputCount: 0, errorCount: 0 },
+        },
         '',
       )
       return { success: true, deletedCount: ids.length, errorCount: 0 }
@@ -127,15 +139,11 @@ export const linksRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      let links
-      if (input.ids?.length) {
-        links = await getLinksByIds(input.ids)
-      } else if (input.status) {
-        links = await getLinksByStatus(input.status)
-      } else {
-        const { getAllLinks } = await import('../lib/db/queries')
-        links = await getAllLinks()
-      }
+      const links = input.ids?.length
+        ? await getLinksByIds(input.ids)
+        : input.status
+          ? await getLinksByStatus(input.status)
+          : await import('../lib/db/queries').then((m) => m.getAllLinks())
 
       if (input.format === 'csv') {
         const headers = [

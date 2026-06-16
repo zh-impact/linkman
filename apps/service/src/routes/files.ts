@@ -38,7 +38,10 @@ export const filesRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      const [total, rows] = await Promise.all([getResolvedUrlCount(), getResolvedUrls(input.limit, input.offset)])
-      return { total: total!.count, urls: rows.map((r) => r.url) }
+      const [total, rows] = await Promise.all([
+        getResolvedUrlCount(),
+        getResolvedUrls(input.limit, input.offset),
+      ])
+      return { total: total?.count ?? 0, urls: rows.map((r) => r.url) }
     }),
 })

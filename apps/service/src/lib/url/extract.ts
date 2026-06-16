@@ -243,7 +243,6 @@ export function parseLinks(content: string, extension?: string): Link[] {
       return splitLines(content)
         .map(parseTitleUrlDash)
         .filter((link): link is Link => link !== null)
-    case 'url_only':
     default:
       return splitLines(content)
         .map(extractUrlOnly)

@@ -68,6 +68,7 @@ export function HistoryPage() {
     }
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fetchOperations is a fresh closure each render; `page` is the intended trigger
   useEffect(() => {
     fetchOperations()
   }, [page])
@@ -163,7 +164,7 @@ export function HistoryPage() {
                           {config.label}
                         </Badge>
                         <Text size="xs" c="dimmed">
-                          {new Date(op.timestamp.replace(' ', 'T') + 'Z').toLocaleString()}
+                          {new Date(`${op.timestamp.replace(' ', 'T')}Z`).toLocaleString()}
                         </Text>
                       </Group>
 

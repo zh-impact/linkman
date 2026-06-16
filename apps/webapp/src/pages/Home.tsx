@@ -208,7 +208,7 @@ export function HomePage() {
                         {opTypeLabels[op.type] ?? op.type}
                       </Badge>
                       <Text size="xs" c="dimmed">
-                        {new Date(op.timestamp.replace(' ', 'T') + 'Z').toLocaleString()}
+                        {new Date(`${op.timestamp.replace(' ', 'T')}Z`).toLocaleString()}
                       </Text>
                     </Group>
                   ))}

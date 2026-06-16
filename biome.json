@@ -32,6 +32,7 @@
     }
   },
   "files": {
+    "ignoreUnknown": true,
     "includes": [
       "**",
       "!!**/mode_modules",
@@ -40,7 +41,10 @@
       "!!**/build",
       "!!**/out",
       "!!**/.next",
-      "!!**/.turbo"
+      "!!**/.turbo",
+      "!!**/data/files",
+      "!!**/drizzle",
+      "!!**/tsconfig.json"
     ]
   }
 }

@@ -137,13 +137,17 @@ function SourcesTab() {
 
   const selectedJob = selected ? (jobMap.get(selected) ?? null) : null
 
-  // Sync type/strategy defaults when selection changes
+  // Sync type/strategy defaults when selection changes.
+  // selectedJob is derived from selected + jobMap; depending only on `selected`
+  // ties the sync to file selection rather than jobMap refetches, so a parse
+  // completion (which refreshes jobMap) won't clobber the user's toolbar overrides.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional narrowing
   useEffect(() => {
     if (selectedJob) {
       setParseType(selectedJob.type)
       setParseStrategy(selectedJob.strategy)
     }
-  }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selected])
 
   const loadFileContent = useCallback(async (filename: string) => {
     setSelected(filename)
@@ -330,7 +334,6 @@ function SourcesTab() {
             ) : (
               <Stack gap={0}>
                 <ParseToolbar
-                  filename={selected}
                   job={selectedJob}
                   progress={selectedJob ? (progressByJob[selectedJob.jobId] ?? null) : null}
                   foreground={foregroundJob === (selectedJob?.jobId ?? '')}
@@ -382,7 +385,6 @@ function setWithout(prev: Set<string>, id: string): Set<string> {
 }
 
 function ParseToolbar({
-  filename,
   job,
   progress,
   foreground,
@@ -398,7 +400,6 @@ function ParseToolbar({
   onParse,
   onStop,
 }: {
-  filename: string
   job: ImportJobInfo | null
   progress: ParseProgress | null
   foreground: boolean
@@ -438,9 +439,6 @@ function ParseToolbar({
       <Stack gap="xs">
         <Group justify="space-between" wrap="nowrap">
           <Group gap="sm" wrap="nowrap">
-            {/* <Text size="sm" fw={600} truncate maw={300}>
-              {filename}
-            </Text> */}
             {job && (
               <Badge color={statusMeta[job.status].color} variant="light">
                 {statusMeta[job.status].label}

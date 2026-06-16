@@ -2,9 +2,7 @@
  * Group links by domain (hostname).
  * Returns a map of groupKey -> array of link IDs.
  */
-export function groupByDomain(
-  links: Array<{ id: string; domain: string }>,
-): Map<string, string[]> {
+export function groupByDomain(links: Array<{ id: string; domain: string }>): Map<string, string[]> {
   const groups = new Map<string, string[]>()
 
   for (const link of links) {

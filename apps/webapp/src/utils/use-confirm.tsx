@@ -1,5 +1,5 @@
 import { Button, Group, Modal, Stack, Text } from '@mantine/core'
-import { useState, useCallback } from 'react'
+import { useCallback, useState } from 'react'
 
 interface ConfirmState {
   opened: boolean
@@ -60,11 +60,7 @@ export function useConfirm() {
           <Button variant="default" size="sm" onClick={cancel}>
             Cancel
           </Button>
-          <Button
-            size="sm"
-            color={state.confirmColor}
-            onClick={state.onConfirm}
-          >
+          <Button size="sm" color={state.confirmColor} onClick={state.onConfirm}>
             {state.confirmLabel}
           </Button>
         </Group>

@@ -110,7 +110,7 @@ export interface Operation {
     removed: string[]
     modified: Array<{
       id: string
-      changes: Record<string, { before: any; after: any }>
+      changes: Record<string, { before: unknown; after: unknown }>
     }>
   }
   stats: {

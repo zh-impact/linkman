@@ -8,7 +8,6 @@ import {
   Container,
   Grid,
   Group,
-  Loader,
   NumberInput,
   Radio,
   Stack,
@@ -36,11 +35,7 @@ function VirtualUrlList({ urls }: { urls: string[] }) {
   })
 
   return (
-    <Box
-      ref={parentRef}
-      mah={300}
-      style={{ overflowY: 'auto' }}
-    >
+    <Box ref={parentRef} mah={300} style={{ overflowY: 'auto' }}>
       <Box style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((item) => {
           const url = urls[item.index]
@@ -83,7 +78,6 @@ function VirtualUrlList({ urls }: { urls: string[] }) {
 
 function SimilarGroupCard({
   group,
-  index,
   expanded,
   selected,
   onToggleExpand,
@@ -96,7 +90,6 @@ function SimilarGroupCard({
     urls: string[]
     count: number
   }
-  index: number
   expanded: boolean
   selected: boolean
   onToggleExpand: () => void
@@ -161,6 +154,7 @@ function SimilarGroupCard({
           ) : (
             <Stack gap={2}>
               {group.urls.map((url, j) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: URLs may duplicate within a group; index keys are intentional
                 <Text key={j} size="xs" ff="monospace" style={{ wordBreak: 'break-all' }}>
                   <Text
                     component="a"
@@ -383,9 +377,9 @@ function SimilarFilter() {
         setGroups((prev) => [...prev, ...data.groups])
         accumulatedSimilar += data.totalSimilar
         setTotalSimilar(accumulatedSimilar)
-        if (data.hasMore) {
+        if (data.hasMore && data.nextCursor !== null) {
           setProgress({ processed: data.processedDomains, total: data.totalDomains })
-          cursor = data.nextCursor!
+          cursor = data.nextCursor
         } else {
           setProgress(null)
           break
@@ -599,7 +593,6 @@ function SimilarFilter() {
                         >
                           <SimilarGroupCard
                             group={groups[item.index]}
-                            index={item.index}
                             expanded={expandedGroups.has(item.index)}
                             selected={selectedGroups.has(groups[item.index].groupKey)}
                             onToggleExpand={() => toggleGroupExpand(item.index)}
@@ -616,7 +609,6 @@ function SimilarFilter() {
                         <SimilarGroupCard
                           key={group.groupKey}
                           group={group}
-                          index={i}
                           expanded={expandedGroups.has(i)}
                           selected={selectedGroups.has(group.groupKey)}
                           onToggleExpand={() => toggleGroupExpand(i)}

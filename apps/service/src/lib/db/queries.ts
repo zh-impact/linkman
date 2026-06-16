@@ -24,7 +24,10 @@ export async function deleteLinksByIds(ids: string[]) {
   if (ids.length === 0) return
   const BATCH = 500
   for (let i = 0; i < ids.length; i += BATCH) {
-    await db.delete(linksTable).where(inArray(linksTable.id, ids.slice(i, i + BATCH))).run()
+    await db
+      .delete(linksTable)
+      .where(inArray(linksTable.id, ids.slice(i, i + BATCH)))
+      .run()
   }
 }
 
@@ -35,7 +38,11 @@ export async function updateLinksStatusByIds(
   if (ids.length === 0) return
   const BATCH = 500
   for (let i = 0; i < ids.length; i += BATCH) {
-    await db.update(linksTable).set(data).where(inArray(linksTable.id, ids.slice(i, i + BATCH))).run()
+    await db
+      .update(linksTable)
+      .set(data)
+      .where(inArray(linksTable.id, ids.slice(i, i + BATCH)))
+      .run()
   }
 }
 
@@ -64,7 +71,9 @@ export async function getActiveLinksForAnalysis(): Promise<AnalysisLink[]> {
       domain: linksTable.domain,
     })
     .from(linksTable)
-    .where(sql`${linksTable.status} NOT IN ('duplicate_removed', 'filtered_internal', 'filtered_similar')`)
+    .where(
+      sql`${linksTable.status} NOT IN ('duplicate_removed', 'filtered_internal', 'filtered_similar')`,
+    )
     .all()
 }
 
@@ -249,11 +258,7 @@ export async function getImportJobById(id: string) {
  * Atomically increment job counters. Safe under concurrent parse.batch calls
  * because SQLite serializes writes and the increment is a single statement.
  */
-export async function incrementImportJob(
-  id: string,
-  importedDelta: number,
-  errorDelta: number,
-) {
+export async function incrementImportJob(id: string, importedDelta: number, errorDelta: number) {
   return db
     .update(importJobs)
     .set({

@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { type AnalysisLink, getActiveLinksForAnalysis, updateLinksStatusByIds } from '../lib/db/queries'
+import {
+  type AnalysisLink,
+  getActiveLinksForAnalysis,
+  updateLinksStatusByIds,
+} from '../lib/db/queries'
 import { logOperation } from '../lib/log'
 import { normalizeUrl } from '../lib/url/normalize'
 import { publicProcedure, router } from '../trpc'
@@ -13,14 +17,16 @@ const defaultNormalizeConfig = {
   removeFragment: true,
 }
 
-const normalizeConfigSchema = z.object({
-  forceHttps: z.boolean(),
-  removeWww: z.boolean(),
-  removeTrailingSlash: z.boolean(),
-  removeDefaultPort: z.boolean(),
-  sortQueryParams: z.boolean(),
-  removeFragment: z.boolean(),
-}).default(defaultNormalizeConfig)
+const normalizeConfigSchema = z
+  .object({
+    forceHttps: z.boolean(),
+    removeWww: z.boolean(),
+    removeTrailingSlash: z.boolean(),
+    removeDefaultPort: z.boolean(),
+    sortQueryParams: z.boolean(),
+    removeFragment: z.boolean(),
+  })
+  .default(defaultNormalizeConfig)
 
 function getNormalizeUrl(strategy: string, normalizeConfig: z.infer<typeof normalizeConfigSchema>) {
   return (url: string): string => {
@@ -47,7 +53,7 @@ function findDuplicateGroups(allLinks: AnalysisLink[], normalize: (url: string) 
     if (!normalizedMap.has(normalizedUrl)) {
       normalizedMap.set(normalizedUrl, [])
     }
-    normalizedMap.get(normalizedUrl)!.push(link.id)
+    normalizedMap.get(normalizedUrl)?.push(link.id)
   }
 
   const groups: Array<{
@@ -65,8 +71,8 @@ function findDuplicateGroups(allLinks: AnalysisLink[], normalize: (url: string) 
     groups.push({
       keepId,
       duplicateIds,
-      keepUrl: linkMap.get(keepId)!.url,
-      duplicateUrls: duplicateIds.map((id) => linkMap.get(id)!.url),
+      keepUrl: linkMap.get(keepId)?.url ?? '',
+      duplicateUrls: duplicateIds.map((id) => linkMap.get(id)?.url ?? ''),
       normalizedUrl,
     })
     duplicateCount += duplicateIds.length
@@ -135,7 +141,11 @@ export const deduplicateRouter = router({
       await logOperation(
         {
           type: 'deduplicate',
-          changes: { added: [], removed: [], modified: groups.flatMap((g) => g.duplicateIds.map((id) => ({ id, changes: {} }))) },
+          changes: {
+            added: [],
+            removed: [],
+            modified: groups.flatMap((g) => g.duplicateIds.map((id) => ({ id, changes: {} }))),
+          },
           stats: {
             inputCount: allLinks.length,
             outputCount: allLinks.length,

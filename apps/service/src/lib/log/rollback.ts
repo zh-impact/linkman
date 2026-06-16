@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
-import { linksTable, operations } from '../db/schema'
 import { getAllLinks, getOperationById, getOperations } from '../db/queries'
+import { linksTable, operations } from '../db/schema'
 import { diffLinks, logOperation, type OperationStats } from './operations'
 
 /**

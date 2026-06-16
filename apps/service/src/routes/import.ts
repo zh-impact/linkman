@@ -11,14 +11,14 @@ import {
 } from '../lib/db/queries'
 import { readFile, writeFile } from '../lib/files'
 import {
+  clearCachedUrls,
   extractUrls,
   getCachedUrls,
-  prepareUrlRecord,
-  setCachedUrls,
-  clearCachedUrls,
-  validateImportUrls,
   type ImportStrategy,
   type ImportType,
+  prepareUrlRecord,
+  setCachedUrls,
+  validateImportUrls,
 } from '../lib/import/parse'
 import { publicProcedure, router } from '../trpc'
 
@@ -32,7 +32,10 @@ const jobLocks = new Map<string, Promise<unknown>>()
 function withJobLock<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
   const prev = (jobLocks.get(jobId) ?? Promise.resolve()).catch(() => undefined)
   const result = prev.then(() => fn())
-  jobLocks.set(jobId, result.catch(() => undefined))
+  jobLocks.set(
+    jobId,
+    result.catch(() => undefined),
+  )
   return result
 }
 
@@ -47,7 +50,7 @@ const typeSchema = z.enum(['TXT', 'JSON'])
  */
 function normalizeFilename(sourceContent: string): string {
   const MAX = 100
-  return sourceContent.length > MAX ? sourceContent.slice(0, MAX) + '…' : sourceContent
+  return sourceContent.length > MAX ? `${sourceContent.slice(0, MAX)}…` : sourceContent
 }
 
 export const importRouter = router({
@@ -65,7 +68,10 @@ export const importRouter = router({
       const type: ImportType =
         input.type ?? (input.filename?.toLowerCase().endsWith('.json') ? 'JSON' : 'TXT')
 
-      const ts = new Date().toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, '')
+      const ts = new Date()
+        .toISOString()
+        .replace(/:/g, '-')
+        .replace(/\.\d+Z$/, '')
       const sanitized = (input.filename || '').replace(/[/\\]/g, '-').replace(/\s+/g, '-')
       const fileRelPath = input.filename ? `${ts}-${sanitized}` : `clipboard-${ts}.txt`
 
@@ -222,21 +228,19 @@ export const importRouter = router({
     }))
   }),
 
-  get: publicProcedure
-    .input(z.object({ filename: z.string() }))
-    .query(async ({ input }) => {
-      const jobs = await listImportJobs()
-      const j = jobs.find((job) => job.sourceContent === input.filename)
-      if (!j) return null
-      return {
-        jobId: j.id,
-        filename: normalizeFilename(j.sourceContent),
-        type: j.type,
-        strategy: j.strategy,
-        status: j.status,
-        importedCount: j.importedCount,
-        errorCount: j.errorCount,
-        createdAt: j.createdAt,
-      }
-    }),
+  get: publicProcedure.input(z.object({ filename: z.string() })).query(async ({ input }) => {
+    const jobs = await listImportJobs()
+    const j = jobs.find((job) => job.sourceContent === input.filename)
+    if (!j) return null
+    return {
+      jobId: j.id,
+      filename: normalizeFilename(j.sourceContent),
+      type: j.type,
+      strategy: j.strategy,
+      status: j.status,
+      importedCount: j.importedCount,
+      errorCount: j.errorCount,
+      createdAt: j.createdAt,
+    }
+  }),
 })

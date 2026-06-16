@@ -310,6 +310,7 @@ export function LinksPage() {
   }, [fetchLinks])
 
   // Reset selection when data changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: deps are intentional triggers, not values used in the effect
   useEffect(() => {
     setSelectedIds(new Set())
   }, [page, status, search])
@@ -730,7 +731,7 @@ export function LinksPage() {
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="dimmed">
-                          {new Date(link.createdAt.replace(' ', 'T') + 'Z').toLocaleString()}
+                          {new Date(`${link.createdAt.replace(' ', 'T')}Z`).toLocaleString()}
                         </Text>
                       </Table.Td>
                       <Table.Td>

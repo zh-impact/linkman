@@ -12,7 +12,7 @@ export function groupByPathPrefix(
     try {
       const url = new URL(link.normalizedUrl)
       const segments = url.pathname.split('/').filter(Boolean)
-      const prefix = '/' + segments.slice(0, depth).join('/')
+      const prefix = `/${segments.slice(0, depth).join('/')}`
       const key = `${url.hostname}${prefix}`
 
       const existing = groups.get(key)

@@ -47,7 +47,6 @@ const VIRTUAL_THRESHOLD = 20
 
 function GroupCard({
   group,
-  index,
   expanded,
   onToggle,
 }: {
@@ -58,7 +57,6 @@ function GroupCard({
     duplicateUrls: string[]
     normalizedUrl: string
   }
-  index: number
   expanded: boolean
   onToggle: () => void
 }) {
@@ -102,7 +100,7 @@ function GroupCard({
             All URLs in group (
             {group.keepUrl === group.normalizedUrl
               ? 'strict match'
-              : 'normalized to: ' + group.normalizedUrl}
+              : `normalized to: ${group.normalizedUrl}`}
             ):
           </Text>
           <Stack gap={2}>
@@ -123,6 +121,7 @@ function GroupCard({
               </Text>
             </Text>
             {group.duplicateUrls.map((url, j) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: duplicate URLs may repeat within a group; index keys are intentional
               <Text key={j} size="xs" c="orange" ff="monospace" style={{ wordBreak: 'break-all' }}>
                 {'[DUP] '}
                 <Text
@@ -149,6 +148,7 @@ function GroupCard({
 
 export function DedupPage() {
   const [strategy, setStrategy] = useState('normalized')
+  // biome-ignore lint/correctness/noUnusedVariables: sort is reserved for future sort-selector UI; currently always 'original'
   const [sort, setSort] = useState('original')
   const [normalizeConfig, setNormalizeConfig] = useState(defaultNormalize)
   const [loading, setLoading] = useState(false)
@@ -402,7 +402,6 @@ export function DedupPage() {
                         >
                           <GroupCard
                             group={preview.groups[item.index]}
-                            index={item.index}
                             expanded={expandedGroups.has(item.index)}
                             onToggle={() => toggleGroup(item.index)}
                           />
@@ -415,9 +414,8 @@ export function DedupPage() {
                     <Stack gap="xs">
                       {preview.groups.map((group, i) => (
                         <GroupCard
-                          key={i}
+                          key={group.keepId}
                           group={group}
-                          index={i}
                           expanded={expandedGroups.has(i)}
                           onToggle={() => toggleGroup(i)}
                         />
