@@ -1,23 +1,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, extname } from 'node:path'
+import { dirname } from 'node:path'
 
 import { program } from 'commander'
 
-import {
-  detectFormat,
-  extractUrlOnly,
-  extractUrlTitlePipe,
-  type Link,
-  parseLinks,
-  parseTitleUrlDash,
-  splitLines,
-} from '../src/lib/url/extract'
-
-const lineParsers: Record<string, (line: string) => Link | null> = {
-  url_only: extractUrlOnly,
-  pipe: extractUrlTitlePipe,
-  dash: parseTitleUrlDash,
-}
+import { extractLinks } from '../src/lib/import/extractors'
+import { type Link, splitLines } from '../src/lib/url/extract'
 
 function dedup(links: Link[]): Link[] {
   const seen = new Set<string>()
@@ -33,55 +20,23 @@ interface FileResult {
   format: string
   lines: number
   links: Link[]
-  emptyLines: number[]
-  skipped: { line: number; content: string }[]
 }
 
 async function processFile(filepath: string): Promise<FileResult> {
   const content = await readFile(filepath, 'utf8')
-  const extension = extname(filepath).toLowerCase()
-  const format = detectFormat(content, extension)
-  const lines = splitLines(content)
-
-  const emptyLines: number[] = []
-  const skipped: { line: number; content: string }[] = []
-  const links: Link[] = []
-
-  const parser = lineParsers[format]
-  if (parser) {
-    for (let i = 0; i < lines.length; i++) {
-      const trimmed = lines[i].trim()
-      if (!trimmed) {
-        emptyLines.push(i + 1)
-        continue
-      }
-      const link = parser(lines[i])
-      if (link) {
-        links.push(link)
-      } else {
-        skipped.push({ line: i + 1, content: trimmed })
-      }
-    }
-  } else {
-    links.push(...parseLinks(content, extension))
+  const { links, detectedFormat } = extractLinks(content, 'TXT', filepath)
+  return {
+    filename: filepath,
+    format: detectedFormat,
+    lines: splitLines(content).length,
+    links,
   }
-
-  return { filename: filepath, format, lines: lines.length, links, emptyLines, skipped }
 }
 
 function printFileResult(r: FileResult): void {
   console.log(`  Format: ${r.format}`)
   console.log(`  Lines: ${r.lines}`)
   console.log(`  Links: ${r.links.length}`)
-  if (r.emptyLines.length) {
-    console.log(`  Empty: ${r.emptyLines.length} (line ${r.emptyLines.join(', ')})`)
-  }
-  if (r.skipped.length) {
-    console.log(`  Skipped: ${r.skipped.length}`)
-    for (const s of r.skipped) {
-      console.log(`    line ${s.line}: ${s.content}`)
-    }
-  }
 }
 
 program

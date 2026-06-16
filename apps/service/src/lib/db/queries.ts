@@ -255,6 +255,14 @@ export async function getImportJobById(id: string) {
 }
 
 /**
+ * Look up a job by its source filename (stored in `source_content`).
+ * Used by `import.ensureJob` to detect existing jobs for orphaned files.
+ */
+export async function getImportJobByFilename(filename: string) {
+  return db.select().from(importJobs).where(eq(importJobs.sourceContent, filename)).get()
+}
+
+/**
  * Atomically increment job counters. Safe under concurrent parse.batch calls
  * because SQLite serializes writes and the increment is a single statement.
  */

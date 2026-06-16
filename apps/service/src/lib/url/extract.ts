@@ -8,6 +8,12 @@
  * - OneTab INI: "URL * Title" with [Group] sections
  * - CSV: Browser history exports (NavigatedToUrl, PageTitle)
  * - Tablerone JSON: Chrome extension export ({ export: [{ tabs: [{ url, title }] }] })
+ * - JSON array: flat array of URL strings or { url, title? } objects
+ * - Netscape Bookmark HTML: browser "Export Bookmarks…" output
+ *
+ * Format detection + dispatch lives in `lib/import/extractors/` (the
+ * pluggable registry). This module exposes the line- and content-level
+ * parsers that the registry's extractor modules wrap.
  */
 
 export interface Link {
@@ -16,13 +22,21 @@ export interface Link {
   source?: string
 }
 
-export type LinkFormat = 'csv' | 'pipe' | 'dash' | 'onetab_ini' | 'tablerone_json' | 'url_only'
+export type LinkFormat =
+  | 'csv'
+  | 'pipe'
+  | 'dash'
+  | 'onetab_ini'
+  | 'tablerone_json'
+  | 'url_only'
+  | 'json_array'
+  | 'bookmarks_html'
 
 export function splitLines(content: string): string[] {
   return content.split(/\r?\n/)
 }
 
-function isValidUrl(url: string): boolean {
+export function isValidUrl(url: string): boolean {
   return url.startsWith('http://') || url.startsWith('https://')
 }
 
@@ -187,65 +201,90 @@ export function parseTableroneJson(content: string): Link[] {
   return links
 }
 
-// --- Format detection ---
+/**
+ * Parse a flat JSON array of URL strings or `{ url, title? }` objects.
+ * Order-preserving — the i-th emitted Link corresponds to the i-th array element.
+ */
+export function parseJsonArray(content: string): Link[] {
+  let data: unknown
+  try {
+    data = JSON.parse(content)
+  } catch {
+    return []
+  }
 
-export function detectFormat(content: string, extension?: string): LinkFormat {
-  if (extension === '.csv') return 'csv'
+  if (!Array.isArray(data)) return []
 
-  const trimmed = content.trim()
-  if (trimmed.startsWith('{')) {
-    try {
-      const data = JSON.parse(trimmed)
-      if (data && typeof data === 'object' && 'export' in data) return 'tablerone_json'
-    } catch {
-      // Not valid JSON, fall through
+  const links: Link[] = []
+  for (const item of data) {
+    let url: string | undefined
+    let title = ''
+
+    if (typeof item === 'string') {
+      url = item
+    } else if (item && typeof item === 'object' && 'url' in item) {
+      const obj = item as { url?: unknown; title?: unknown }
+      if (typeof obj.url === 'string') url = obj.url
+      if (typeof obj.title === 'string') title = obj.title
+    }
+
+    if (url && isValidUrl(url)) {
+      links.push({ url, title })
     }
   }
 
-  const firstLines = splitLines(content).slice(0, 10)
-
-  const hasIniSections = firstLines.some((l) => {
-    const t = l.trim()
-    return t.startsWith('[') && t.endsWith(']')
-  })
-  const hasOnetabFormat = firstLines.some((l) => l.includes(' * '))
-
-  if (hasIniSections && hasOnetabFormat) return 'onetab_ini'
-  if (firstLines.some((l) => l.includes(' | '))) return 'pipe'
-  if (
-    firstLines.some((l) => {
-      const idx = l.lastIndexOf(' - ')
-      return idx !== -1 && isValidUrl(l.slice(idx + 3).trim())
-    })
-  )
-    return 'dash'
-
-  return 'url_only'
+  return links
 }
 
-// --- High-level entry point ---
+// --- Netscape Bookmark HTML ---
 
-export function parseLinks(content: string, extension?: string): Link[] {
-  const format = detectFormat(content, extension)
+const NAMED_HTML_ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  nbsp: '\u00a0',
+}
 
-  switch (format) {
-    case 'csv':
-      return parseCsvContent(content)
-    case 'tablerone_json':
-      return parseTableroneJson(content)
-    case 'onetab_ini':
-      return parseOnetabIni(content)
-    case 'pipe':
-      return splitLines(content)
-        .map(extractUrlTitlePipe)
-        .filter((link): link is Link => link !== null)
-    case 'dash':
-      return splitLines(content)
-        .map(parseTitleUrlDash)
-        .filter((link): link is Link => link !== null)
-    default:
-      return splitLines(content)
-        .map(extractUrlOnly)
-        .filter((link): link is Link => link !== null)
+/**
+ * Decode the subset of HTML entities that appear in browser bookmark titles.
+ * Named: the common five plus `&nbsp;`. Numeric: decimal `&#DDDD;` and hex
+ * `&#xHHHH;`. Codepoints above U+10FFFF are left as literal text so a
+ * malformed entity cannot produce garbage. No external dependency.
+ */
+export function decodeHtmlEntities(s: string): string {
+  return s.replace(/&(?:[a-zA-Z]+|#\d+|#x[0-9a-fA-F]+);/g, (entity) => {
+    if (entity.startsWith('&#x') || entity.startsWith('&#X')) {
+      const code = parseInt(entity.slice(3, -1), 16)
+      return code > 0x10ffff ? entity : String.fromCodePoint(code)
+    }
+    if (entity.startsWith('&#')) {
+      const code = Number(entity.slice(2, -1))
+      return code > 0x10ffff ? entity : String.fromCodePoint(code)
+    }
+    const name = entity.slice(1, -1)
+    return NAMED_HTML_ENTITIES[name] ?? entity
+  })
+}
+
+const BOOKMARK_ANCHOR_RE = /<A\s+HREF="([^"]+)"[^>]*>([^<]*)<\/A>/gi
+
+/**
+ * Parse Netscape Bookmark File Format HTML emitted by Chrome / Firefox /
+ * Edge / Safari "Export Bookmarks…". Iterates `<A HREF="url" …>Title</A>`
+ * anchors case-insensitively, decodes entities in titles, and emits one
+ * `Link` per anchor whose URL is well-formed. Order matches source order
+ * (regex iteration is left-to-right).
+ */
+export function parseBookmarksHtml(content: string): Link[] {
+  const links: Link[] = []
+  for (const match of content.matchAll(BOOKMARK_ANCHOR_RE)) {
+    const url = match[1] ?? ''
+    const rawTitle = match[2] ?? ''
+    if (isValidUrl(url)) {
+      links.push({ url, title: decodeHtmlEntities(rawTitle) })
+    }
   }
+  return links
 }

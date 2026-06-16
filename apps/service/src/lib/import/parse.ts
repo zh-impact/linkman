@@ -1,8 +1,13 @@
 import { v4 as uuidv4 } from 'uuid'
 import type { NormalizeConfig } from '../../types'
 import type { linksTable } from '../db/schema'
+import type { Link, LinkFormat } from '../url/extract'
 import { extractDomain, normalizeUrl } from '../url/normalize'
 import { validateUrls } from '../url/validate'
+import type { ImportType } from './extractors'
+
+export type { ImportType } from './extractors'
+export { extractLinks } from './extractors'
 
 export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
   forceHttps: false,
@@ -23,47 +28,34 @@ const SMART_NORMALIZE_CONFIG: NormalizeConfig = {
 }
 
 export type ImportStrategy = 'strict' | 'normalized' | 'smart'
-export type ImportType = 'TXT' | 'JSON'
 
 /**
- * Extract raw URL strings from source content.
- * Order-deterministic: TXT preserves line order; JSON preserves array order.
- * This determinism is what makes parse.batch resumable after a cache miss.
+ * Partition extracted links by URL well-formedness. Each extractor already
+ * filters to `http(s)://` lines, but `validateUrls` applies stricter rules
+ * (e.g. rejects URLs that fail `new URL(...)`). Returns `valid` (Link[] that
+ * passed) and `invalid` (raw URL strings that failed). Order is preserved in
+ * each partition, which keeps batch slicing deterministic.
  */
-export function extractUrls(type: ImportType, content: string): string[] {
-  if (type === 'JSON') {
-    try {
-      const parsed = JSON.parse(content)
-      if (!Array.isArray(parsed)) return []
-      return parsed.map((item: unknown) => {
-        if (typeof item === 'string') return item
-        if (item && typeof item === 'object' && 'url' in item) {
-          return String((item as { url: string }).url)
-        }
-        return String(item)
-      })
-    } catch {
-      return []
-    }
+export function validateImportLinks(links: Link[]): { valid: Link[]; invalid: string[] } {
+  const { invalid: invalidUrls } = validateUrls(links.map((l) => l.url))
+  const invalidSet = new Set(invalidUrls)
+  const valid: Link[] = []
+  const invalid: string[] = []
+  for (const link of links) {
+    if (invalidSet.has(link.url)) invalid.push(link.url)
+    else valid.push(link)
   }
-  return content
-    .split('\n')
-    .map((u) => u.trim())
-    .filter(Boolean)
-}
-
-/** Validate a list of raw URLs, splitting into valid/invalid (order-preserving). */
-export function validateImportUrls(urls: string[]) {
-  return validateUrls(urls)
+  return { valid, invalid }
 }
 
 /** Build a single link record for insertion. */
 export function prepareUrlRecord(
-  originalUrl: string,
+  link: Link,
   strategy: ImportStrategy,
   sourceType: ImportType,
   order: number,
 ): typeof linksTable.$inferInsert {
+  const originalUrl = link.url
   const normalizedUrl =
     strategy === 'strict'
       ? originalUrl
@@ -78,6 +70,7 @@ export function prepareUrlRecord(
     originalUrl,
     normalizedUrl,
     domain,
+    title: link.title ?? '',
     source: sourceType,
     sourceOrder: order,
     status: 'imported',
@@ -86,14 +79,15 @@ export function prepareUrlRecord(
   }
 }
 
-// --- In-memory cache for the validated URL list of an in-progress parse job ---
+// --- In-memory cache for the validated link list of an in-progress parse job ---
 // This is an optimization, not a correctness requirement: parse.batch self-heals
 // by re-reading the file when an entry is missing (e.g. after a service restart).
 
 export interface ParseCacheEntry {
-  valid: string[]
+  valid: Link[]
   invalid: string[]
   total: number
+  detectedFormat: LinkFormat
 }
 
 const parseCache = new Map<string, ParseCacheEntry>()

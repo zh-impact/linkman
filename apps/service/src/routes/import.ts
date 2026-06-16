@@ -2,6 +2,7 @@ import { TRPCError } from '@trpc/server'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import {
+  getImportJobByFilename,
   getImportJobById,
   incrementImportJob,
   insertImportJob,
@@ -12,13 +13,13 @@ import {
 import { readFile, writeFile } from '../lib/files'
 import {
   clearCachedUrls,
-  extractUrls,
+  extractLinks,
   getCachedUrls,
   type ImportStrategy,
   type ImportType,
   prepareUrlRecord,
   setCachedUrls,
-  validateImportUrls,
+  validateImportLinks,
 } from '../lib/import/parse'
 import { publicProcedure, router } from '../trpc'
 
@@ -119,16 +120,26 @@ export const importRouter = router({
         }
 
         const content = await readFile(job.sourceContent)
-        const urls = extractUrls(nextType, content)
-        const { valid, invalid } = validateImportUrls(urls)
-        setCachedUrls(input.jobId, { valid, invalid, total: valid.length })
+        const { links, detectedFormat } = extractLinks(content, nextType, job.sourceContent)
+        const { valid, invalid } = validateImportLinks(links)
+        setCachedUrls(input.jobId, {
+          valid,
+          invalid,
+          total: valid.length,
+          detectedFormat,
+        })
 
         await updateImportJob(input.jobId, {
           status: 'processing',
           errorCount: invalid.length,
         })
 
-        return { jobId: input.jobId, totalValid: valid.length, invalidCount: invalid.length }
+        return {
+          jobId: input.jobId,
+          totalValid: valid.length,
+          invalidCount: invalid.length,
+          detectedFormat,
+        }
       }),
 
     // Step 2b: insert the next batch. Self-heals on cache miss (service restart).
@@ -164,8 +175,9 @@ export const importRouter = router({
           let cached = getCachedUrls(input.jobId)
           if (!cached) {
             const content = await readFile(job.sourceContent)
-            const { valid, invalid } = validateImportUrls(extractUrls(job.type, content))
-            cached = { valid, invalid, total: valid.length }
+            const { links, detectedFormat } = extractLinks(content, job.type, job.sourceContent)
+            const { valid, invalid } = validateImportLinks(links)
+            cached = { valid, invalid, total: valid.length, detectedFormat }
             setCachedUrls(input.jobId, cached)
           }
 
@@ -189,7 +201,7 @@ export const importRouter = router({
 
           const records = cached.valid
             .slice(start, end)
-            .map((url, i) => prepareUrlRecord(url, job.strategy, job.type, start + i))
+            .map((link, i) => prepareUrlRecord(link, job.strategy, job.type, start + i))
 
           if (records.length > 0) await insertLinks(records)
           await incrementImportJob(input.jobId, records.length, 0)
@@ -243,4 +255,68 @@ export const importRouter = router({
       createdAt: j.createdAt,
     }
   }),
+
+  /**
+   * Resolve a filename to a job, creating a pending job if none exists yet.
+   * Used by the Files toolbar to make the Parse button work for files that
+   * are on disk but have no import_job row (e.g. files placed manually in
+   * `data/files/`, or jobs deleted while the file remained). Idempotent:
+   * calling it twice for the same filename returns the same job.
+   */
+  ensureJob: publicProcedure
+    .input(
+      z.object({
+        filename: z.string(),
+        type: typeSchema.optional(),
+        strategy: strategySchema.optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const existing = await getImportJobByFilename(input.filename)
+      if (existing) {
+        return {
+          jobId: existing.id,
+          type: existing.type,
+          strategy: existing.strategy,
+          status: existing.status,
+          importedCount: existing.importedCount,
+          errorCount: existing.errorCount,
+          createdAt: existing.createdAt,
+        }
+      }
+
+      // Reject if the file isn't actually on disk — otherwise we'd create
+      // a job that parse.start can never fulfil.
+      try {
+        await readFile(input.filename)
+      } catch {
+        throw new TRPCError({ code: 'NOT_FOUND', message: `File not found: ${input.filename}` })
+      }
+
+      const type: ImportType =
+        input.type ?? (input.filename.toLowerCase().endsWith('.json') ? 'JSON' : 'TXT')
+      const strategy: ImportStrategy = input.strategy ?? 'normalized'
+
+      const jobId = uuidv4()
+      await insertImportJob({
+        id: jobId,
+        type,
+        sourceContent: input.filename,
+        strategy,
+        status: 'pending',
+        importedCount: 0,
+        duplicateCount: 0,
+        errorCount: 0,
+      })
+
+      return {
+        jobId,
+        type,
+        strategy,
+        status: 'pending' as const,
+        importedCount: 0,
+        errorCount: 0,
+        createdAt: new Date().toISOString(),
+      }
+    }),
 })

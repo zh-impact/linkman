@@ -346,9 +346,29 @@ function SourcesTab() {
                   onTypeChange={setParseType}
                   onStrategyChange={setParseStrategy}
                   onBackgroundChange={setBackground}
-                  onParse={() => {
-                    if (!selectedJob) return
-                    runParse(selectedJob.jobId, { background })
+                  onParse={async () => {
+                    if (!selected) return
+                    let jobId = selectedJob?.jobId
+                    if (!jobId) {
+                      // File on disk has no import_job (orphaned). Auto-create
+                      // one so the Parse button is always recoverable.
+                      try {
+                        const res = await trpc.import.ensureJob.mutate({
+                          filename: selected,
+                          type: parseType,
+                          strategy: parseStrategy,
+                        })
+                        jobId = res.jobId
+                        // Refresh jobMap so the toolbar reflects the new job
+                        // (status badge, completion dot, etc.) without waiting
+                        // for the post-parse fetchAll.
+                        fetchAll()
+                      } catch (err) {
+                        setContentError(err instanceof Error ? err.message : 'Failed to create job')
+                        return
+                      }
+                    }
+                    if (jobId) runParse(jobId, { background })
                   }}
                   onStop={() => {
                     if (!selectedJob) return
