@@ -69,10 +69,7 @@ export const importRouter = router({
       const type: ImportType =
         input.type ?? (input.filename?.toLowerCase().endsWith('.json') ? 'JSON' : 'TXT')
 
-      const ts = new Date()
-        .toISOString()
-        .replace(/:/g, '-')
-        .replace(/\.\d+Z$/, '')
+      const ts = Math.floor(Date.now() / 1000).toString()
       const sanitized = (input.filename || '').replace(/[/\\]/g, '-').replace(/\s+/g, '-')
       const fileRelPath = input.filename ? `${ts}-${sanitized}` : `clipboard-${ts}.txt`
 
