@@ -245,6 +245,29 @@ export async function getImportJobById(id: string) {
   return db.select().from(importJobs).where(eq(importJobs.id, id)).get()
 }
 
+/**
+ * Atomically increment job counters. Safe under concurrent parse.batch calls
+ * because SQLite serializes writes and the increment is a single statement.
+ */
+export async function incrementImportJob(
+  id: string,
+  importedDelta: number,
+  errorDelta: number,
+) {
+  return db
+    .update(importJobs)
+    .set({
+      importedCount: sql`${importJobs.importedCount} + ${importedDelta}`,
+      errorCount: sql`${importJobs.errorCount} + ${errorDelta}`,
+    })
+    .where(eq(importJobs.id, id))
+    .run()
+}
+
+export async function listImportJobs() {
+  return db.select().from(importJobs).orderBy(desc(importJobs.createdAt)).all()
+}
+
 // TestJob queries
 export async function insertTestJob(data: typeof testJobs.$inferInsert) {
   return db.insert(testJobs).values(data).run()

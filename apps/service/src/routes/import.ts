@@ -1,162 +1,242 @@
+import { TRPCError } from '@trpc/server'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
-import { insertImportJob, insertLinks, updateImportJob } from '../lib/db/queries'
-import { writeFile } from '../lib/files'
-import { extractDomain, normalizeUrl } from '../lib/url/normalize'
-import { validateUrls } from '../lib/url/validate'
+import {
+  getImportJobById,
+  incrementImportJob,
+  insertImportJob,
+  insertLinks,
+  listImportJobs,
+  updateImportJob,
+} from '../lib/db/queries'
+import { readFile, writeFile } from '../lib/files'
+import {
+  extractUrls,
+  getCachedUrls,
+  prepareUrlRecord,
+  setCachedUrls,
+  clearCachedUrls,
+  validateImportUrls,
+  type ImportStrategy,
+  type ImportType,
+} from '../lib/import/parse'
 import { publicProcedure, router } from '../trpc'
 
-const DEFAULT_NORMALIZE_CONFIG = {
-  forceHttps: false,
-  removeWww: true,
-  removeTrailingSlash: true,
-  removeDefaultPort: true,
-  sortQueryParams: false,
-  removeFragment: true,
+/**
+ * Per-job serialization lock. The frontend drives one batch loop per job, but
+ * two tabs or a double-click could overlap. This guarantees each batch reads a
+ * distinct importedCount offset and inserts a distinct URL slice. Combined with
+ * the atomic SQL increment, concurrent batches cannot lose or duplicate work.
+ */
+const jobLocks = new Map<string, Promise<unknown>>()
+function withJobLock<T>(jobId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = (jobLocks.get(jobId) ?? Promise.resolve()).catch(() => undefined)
+  const result = prev.then(() => fn())
+  jobLocks.set(jobId, result.catch(() => undefined))
+  return result
 }
 
-const BATCH_SIZE = 500
+const strategySchema = z.enum(['strict', 'normalized', 'smart'])
+const typeSchema = z.enum(['TXT', 'JSON'])
+
+/**
+ * Real source filenames are short (e.g. `2026-06-16T12-55-58-heal.txt`). Legacy
+ * rows created before file storage stored the full raw content in sourceContent;
+ * returning those untrimmed would make import.list a multi-MB payload. Truncating
+ * keeps the payload small without affecting legitimate filenames or file matching.
+ */
+function normalizeFilename(sourceContent: string): string {
+  const MAX = 100
+  return sourceContent.length > MAX ? sourceContent.slice(0, MAX) + '…' : sourceContent
+}
 
 export const importRouter = router({
+  // Step 1: persist source file + create a pending job. No parsing.
   create: publicProcedure
     .input(
       z.object({
-        type: z.enum(['TXT', 'JSON']),
         content: z.string(),
-        strategy: z.enum(['strict', 'normalized', 'smart']),
         filename: z.string().optional(),
+        type: typeSchema.optional(),
+        strategy: strategySchema.default('normalized'),
       }),
     )
-    .mutation(async (opts) => {
-      const {
-        input: { type, content, strategy, filename },
-      } = opts
+    .mutation(async ({ input }) => {
+      const type: ImportType =
+        input.type ?? (input.filename?.toLowerCase().endsWith('.json') ? 'JSON' : 'TXT')
 
-      console.log(`[import] start: type=${type}, contentLen=${content.length}, strategy=${strategy}`)
-
-      // Generate file path and save content to disk
       const ts = new Date().toISOString().replace(/:/g, '-').replace(/\.\d+Z$/, '')
-      const sanitized = (filename || '').replace(/[/\\]/g, '-').replace(/\s+/g, '-')
-      const fileRelPath = filename
-        ? `${ts}-${sanitized}`
-        : `clipboard-${ts}.txt`
-      await writeFile(fileRelPath, content)
-      console.log(`[import] file saved: ${fileRelPath}`)
+      const sanitized = (input.filename || '').replace(/[/\\]/g, '-').replace(/\s+/g, '-')
+      const fileRelPath = input.filename ? `${ts}-${sanitized}` : `clipboard-${ts}.txt`
+
+      await writeFile(fileRelPath, input.content)
 
       const jobId = uuidv4()
       await insertImportJob({
         id: jobId,
-        type: type,
+        type,
         sourceContent: fileRelPath,
-        strategy: strategy,
-        status: 'processing',
+        strategy: input.strategy,
+        status: 'pending',
         importedCount: 0,
         duplicateCount: 0,
         errorCount: 0,
       })
-      console.log(`[import] job created: ${jobId}`)
 
-      let urls: string[] = []
+      return { jobId, filename: fileRelPath }
+    }),
 
-      if (type === 'JSON') {
-        try {
-          const parsed = JSON.parse(content)
-          console.log(`[import] JSON parsed: type=${typeof parsed}, isArray=${Array.isArray(parsed)}, sample=${JSON.stringify(parsed).slice(0, 200)}`)
-          urls = Array.isArray(parsed)
-            ? parsed.map((item: unknown) => {
-                if (typeof item === 'string') return item
-                if (item && typeof item === 'object' && 'url' in item) return String((item as { url: string }).url)
-                return String(item)
-              })
-            : []
-        } catch (err) {
-          console.error(`[import] JSON parse error:`, err)
-          await updateImportJob(jobId, { status: 'failed', errorCount: 1 })
-          return { importedCount: 0, invalid: [] }
+  parse: router({
+    // Step 2a: extract + validate once, cache, transition to processing.
+    start: publicProcedure
+      .input(
+        z.object({
+          jobId: z.string(),
+          type: typeSchema.optional(),
+          strategy: strategySchema.optional(),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        const job = await getImportJobById(input.jobId)
+        if (!job) throw new TRPCError({ code: 'NOT_FOUND', message: 'Job not found' })
+        if (job.status === 'completed') {
+          throw new TRPCError({
+            code: 'CONFLICT',
+            message: 'Job already completed; delete the file/job and re-import to re-parse',
+          })
         }
-      } else {
-        urls = content
-          .split('\n')
-          .map((u) => u.trim())
-          .filter(Boolean)
-      }
 
-      console.log(`[import] extracted ${urls.length} raw URLs`)
+        const nextType: ImportType = input.type ?? job.type
+        const nextStrategy: ImportStrategy = input.strategy ?? job.strategy
+        if (nextType !== job.type || nextStrategy !== job.strategy) {
+          await updateImportJob(input.jobId, { type: nextType, strategy: nextStrategy })
+        }
 
-      const { valid, invalid } = validateUrls(urls)
-      console.log(`[import] validated: valid=${valid.length}, invalid=${invalid.length}`)
-      if (invalid.length > 0) {
-        console.log(`[import] invalid sample:`, invalid.slice(0, 5))
-        await updateImportJob(jobId, { errorCount: invalid.length })
-      }
+        const content = await readFile(job.sourceContent)
+        const urls = extractUrls(nextType, content)
+        const { valid, invalid } = validateImportUrls(urls)
+        setCachedUrls(input.jobId, { valid, invalid, total: valid.length })
 
-      let importedCount = 0
-      const batch: (typeof import('../lib/db/schema').linksTable.$inferInsert)[] = []
+        await updateImportJob(input.jobId, {
+          status: 'processing',
+          errorCount: invalid.length,
+        })
 
-      const flushBatch = async () => {
-        if (batch.length === 0) return
-        const count = batch.length
-        await insertLinks(batch)
-        batch.length = 0
-        console.log(`[import] flushed batch of ${count}, total imported so far: ${importedCount}`)
-      }
+        return { jobId: input.jobId, totalValid: valid.length, invalidCount: invalid.length }
+      }),
 
-      for (let i = 0; i < valid.length; i++) {
-        try {
-          const originalUrl = valid[i]
+    // Step 2b: insert the next batch. Self-heals on cache miss (service restart).
+    batch: publicProcedure
+      .input(
+        z.object({
+          jobId: z.string(),
+          batchSize: z.number().min(1).max(2000).default(500),
+        }),
+      )
+      .mutation(async ({ input }) => {
+        return withJobLock(input.jobId, async () => {
+          const job = await getImportJobById(input.jobId)
+          if (!job) throw new TRPCError({ code: 'NOT_FOUND', message: 'Job not found' })
 
-          let normalizedUrl: string
-          if (strategy === 'strict') {
-            normalizedUrl = originalUrl
-          } else if (strategy === 'normalized') {
-            normalizedUrl = normalizeUrl(originalUrl, DEFAULT_NORMALIZE_CONFIG)
-          } else {
-            normalizedUrl = normalizeUrl(originalUrl, {
-              forceHttps: false,
-              removeWww: true,
-              removeTrailingSlash: true,
-              removeDefaultPort: false,
-              sortQueryParams: false,
-              removeFragment: false,
+          if (job.status === 'completed') {
+            return {
+              importedCount: job.importedCount,
+              totalValid: job.importedCount,
+              errorCount: job.errorCount,
+              done: true,
+              status: 'completed' as const,
+            }
+          }
+          if (job.status !== 'processing') {
+            throw new TRPCError({
+              code: 'CONFLICT',
+              message: 'Call import.parse.start first',
             })
           }
 
-          const domain = extractDomain(originalUrl)
-
-          batch.push({
-            id: uuidv4(),
-            originalUrl,
-            normalizedUrl,
-            domain,
-            source: type,
-            sourceOrder: i,
-            status: 'imported',
-            tags: '[]',
-            isInternal: false,
-          })
-
-          importedCount++
-
-          if (batch.length >= BATCH_SIZE) {
-            await flushBatch()
+          // Self-heal: rebuild the cache if missing (e.g. after restart).
+          let cached = getCachedUrls(input.jobId)
+          if (!cached) {
+            const content = await readFile(job.sourceContent)
+            const { valid, invalid } = validateImportUrls(extractUrls(job.type, content))
+            cached = { valid, invalid, total: valid.length }
+            setCachedUrls(input.jobId, cached)
           }
-        } catch (err) {
-          console.error(`[import] error at URL #${i}:`, err)
-        }
-      }
 
-      await flushBatch()
+          const start = job.importedCount
+          const end = Math.min(start + input.batchSize, cached.total)
+          if (end <= start) {
+            // Nothing left; finalize.
+            await updateImportJob(input.jobId, {
+              status: 'completed',
+              completedAt: new Date().toISOString(),
+            })
+            clearCachedUrls(input.jobId)
+            return {
+              importedCount: start,
+              totalValid: cached.total,
+              errorCount: job.errorCount,
+              done: true,
+              status: 'completed' as const,
+            }
+          }
 
-      console.log(`[import] done: imported=${importedCount}, invalid=${invalid.length}`)
+          const records = cached.valid
+            .slice(start, end)
+            .map((url, i) => prepareUrlRecord(url, job.strategy, job.type, start + i))
 
-      await updateImportJob(jobId, {
-        status: 'completed',
-        importedCount,
-      })
+          if (records.length > 0) await insertLinks(records)
+          await incrementImportJob(input.jobId, records.length, 0)
 
+          const done = end >= cached.total
+          if (done) {
+            await updateImportJob(input.jobId, {
+              status: 'completed',
+              completedAt: new Date().toISOString(),
+            })
+            clearCachedUrls(input.jobId)
+          }
+
+          return {
+            importedCount: end,
+            totalValid: cached.total,
+            errorCount: job.errorCount,
+            done,
+            status: (done ? 'completed' : 'processing') as 'completed' | 'processing',
+          }
+        })
+      }),
+  }),
+
+  list: publicProcedure.query(async () => {
+    const jobs = await listImportJobs()
+    return jobs.map((j) => ({
+      jobId: j.id,
+      filename: normalizeFilename(j.sourceContent),
+      type: j.type,
+      strategy: j.strategy,
+      status: j.status,
+      importedCount: j.importedCount,
+      errorCount: j.errorCount,
+      createdAt: j.createdAt,
+    }))
+  }),
+
+  get: publicProcedure
+    .input(z.object({ filename: z.string() }))
+    .query(async ({ input }) => {
+      const jobs = await listImportJobs()
+      const j = jobs.find((job) => job.sourceContent === input.filename)
+      if (!j) return null
       return {
-        importedCount,
-        invalid: invalid.slice(0, 100),
+        jobId: j.id,
+        filename: normalizeFilename(j.sourceContent),
+        type: j.type,
+        strategy: j.strategy,
+        status: j.status,
+        importedCount: j.importedCount,
+        errorCount: j.errorCount,
+        createdAt: j.createdAt,
       }
     }),
 })

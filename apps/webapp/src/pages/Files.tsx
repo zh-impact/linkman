@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Alert,
+  Badge,
   Box,
   Button,
   Card,
@@ -11,9 +12,12 @@ import {
   Group,
   Loader,
   Modal,
+  Progress,
   ScrollArea,
   SegmentedControl,
+  Select,
   Stack,
+  Switch,
   Tabs,
   Text,
   Title,
@@ -24,6 +28,40 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
+
+type JobStatus = 'pending' | 'processing' | 'completed' | 'failed'
+type JobType = 'TXT' | 'JSON'
+type JobStrategy = 'strict' | 'normalized' | 'smart'
+
+interface ImportJobInfo {
+  jobId: string
+  filename: string
+  type: JobType
+  strategy: JobStrategy
+  status: JobStatus
+  importedCount: number
+  errorCount: number
+  createdAt: string
+}
+
+interface ParseProgress {
+  imported: number
+  total: number
+  error: number
+}
+
+interface FileInfo {
+  filename: string
+  size: number
+  modifiedAt: string
+}
+
+const statusMeta: Record<JobStatus, { color: string; label: string }> = {
+  pending: { color: 'gray', label: 'Pending' },
+  processing: { color: 'yellow', label: 'Processing' },
+  completed: { color: 'green', label: 'Completed' },
+  failed: { color: 'red', label: 'Failed' },
+}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -57,9 +95,8 @@ export function FilesPage() {
 }
 
 function SourcesTab() {
-  const [files, setFiles] = useState<Array<{ filename: string; size: number; modifiedAt: string }>>(
-    [],
-  )
+  const [files, setFiles] = useState<FileInfo[]>([])
+  const [jobMap, setJobMap] = useState<Map<string, ImportJobInfo>>(new Map())
   const [selected, setSelected] = useState<string | null>(null)
   const [allLines, setAllLines] = useState<string[]>([])
   const [loadingFiles, setLoadingFiles] = useState(true)
@@ -68,21 +105,45 @@ function SourcesTab() {
   const [importOpened, { open: openImport, close: closeImport }] = useDisclosure(false)
   const confirmDlg = useConfirm()
 
-  const fetchFiles = useCallback(async () => {
-    setLoadingFiles(true)
-    try {
-      const data = await trpc.files.list.query()
-      setFiles(data)
-    } catch {
-      /* ignore */
-    } finally {
-      setLoadingFiles(false)
-    }
+  // Parse state
+  const [progressByJob, setProgressByJob] = useState<Record<string, ParseProgress>>({})
+  const [foregroundJob, setForegroundJob] = useState<string | null>(null)
+  const [backgroundJobs, setBackgroundJobs] = useState<Set<string>>(new Set())
+  const [parseType, setParseType] = useState<JobType>('TXT')
+  const [parseStrategy, setParseStrategy] = useState<JobStrategy>('normalized')
+  const [background, setBackground] = useState(false)
+  const stopRef = useRef<Set<string>>(new Set())
+
+  const fetchAll = useCallback(async () => {
+    const [fs, js] = await Promise.all([trpc.files.list.query(), trpc.import.list.query()])
+    setFiles(fs as FileInfo[])
+    const m = new Map<string, ImportJobInfo>()
+    for (const j of js) m.set(j.filename, j as ImportJobInfo)
+    setJobMap(m)
   }, [])
 
   useEffect(() => {
-    fetchFiles()
-  }, [fetchFiles])
+    ;(async () => {
+      setLoadingFiles(true)
+      try {
+        await fetchAll()
+      } catch {
+        /* ignore */
+      } finally {
+        setLoadingFiles(false)
+      }
+    })()
+  }, [fetchAll])
+
+  const selectedJob = selected ? (jobMap.get(selected) ?? null) : null
+
+  // Sync type/strategy defaults when selection changes
+  useEffect(() => {
+    if (selectedJob) {
+      setParseType(selectedJob.type)
+      setParseStrategy(selectedJob.strategy)
+    }
+  }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadFileContent = useCallback(async (filename: string) => {
     setSelected(filename)
@@ -93,7 +154,6 @@ function SourcesTab() {
       const data = await trpc.files.getContent.query({ filename })
       setAllLines(data.content.split('\n'))
     } catch (err) {
-      console.error('[files] load error:', err)
       setContentError(err instanceof Error ? err.message : 'Failed to load file')
       setAllLines([])
     } finally {
@@ -114,13 +174,62 @@ function SourcesTab() {
       setSelected(null)
       setAllLines([])
     }
-    fetchFiles()
+    fetchAll()
   }
 
   const handleImportDone = () => {
     closeImport()
-    fetchFiles()
+    fetchAll()
   }
+
+  const runParse = useCallback(
+    async (jobId: string, opts: { background: boolean }) => {
+      const isBg = opts.background
+      if (isBg) setBackgroundJobs((prev) => new Set(prev).add(jobId))
+      else setForegroundJob(jobId)
+      stopRef.current.delete(jobId)
+      try {
+        const startRes = await trpc.import.parse.start.mutate({
+          jobId,
+          type: parseType,
+          strategy: parseStrategy,
+        })
+        setProgressByJob((prev) => ({
+          ...prev,
+          [jobId]: { imported: 0, total: startRes.totalValid, error: startRes.invalidCount },
+        }))
+        while (true) {
+          if (stopRef.current.has(jobId)) break
+          const b = await trpc.import.parse.batch.mutate({ jobId })
+          setProgressByJob((prev) => ({
+            ...prev,
+            [jobId]: {
+              imported: b.importedCount,
+              total: b.totalValid,
+              error: b.errorCount,
+            },
+          }))
+          if (b.done) break
+        }
+      } catch (err) {
+        setContentError(err instanceof Error ? err.message : 'Parse failed')
+      } finally {
+        if (isBg) setBackgroundJobs((prev) => setWithout(prev, jobId))
+        else setForegroundJob(null)
+        // Clear progress a moment after completion so the dot can take over
+        setProgressByJob((prev) => {
+          if (!stopRef.current.has(jobId)) {
+            const next = { ...prev }
+            delete next[jobId]
+            return next
+          }
+          return prev
+        })
+        fetchAll()
+      }
+    },
+    [parseType, parseStrategy, fetchAll],
+  )
 
   return (
     <>
@@ -142,70 +251,122 @@ function SourcesTab() {
           <Card withBorder p={0} w={300}>
             <ScrollArea.Autosize mah="calc(100vh - 280px)" offsetScrollbars>
               <Stack gap={0}>
-                {files.map((f) => (
-                  <Box
-                    key={f.filename}
-                    onClick={() => loadFileContent(f.filename)}
-                    p="sm"
-                    bg={selected === f.filename ? 'var(--mantine-color-blue-light)' : undefined}
-                    style={{
-                      borderBottom: '1px solid var(--mantine-color-gray-2)',
-                      width: '100%',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <Group justify="space-between" wrap="nowrap">
-                      <Box style={{ flex: 1, minWidth: 0 }}>
-                        <Text size="sm" fw={500} truncate>
-                          {f.filename}
-                        </Text>
-                        <Group gap="xs">
-                          <Text size="xs" c="dimmed">
-                            {formatSize(f.size)}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {new Date(f.modifiedAt).toLocaleString()}
-                          </Text>
+                {files.map((f) => {
+                  const job = jobMap.get(f.filename) ?? null
+                  const meta = job ? statusMeta[job.status] : null
+                  return (
+                    <Box
+                      key={f.filename}
+                      onClick={() => loadFileContent(f.filename)}
+                      p="sm"
+                      bg={selected === f.filename ? 'var(--mantine-color-blue-light)' : undefined}
+                      style={{
+                        borderBottom: '1px solid var(--mantine-color-gray-2)',
+                        width: '100%',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Group justify="space-between" wrap="nowrap">
+                        <Group gap="xs" wrap="nowrap">
+                          {meta && (
+                            <Box
+                              title={meta.label}
+                              style={{
+                                width: 9,
+                                height: 9,
+                                borderRadius: '50%',
+                                flexShrink: 0,
+                                background: `var(--mantine-color-${meta.color}-6)`,
+                              }}
+                            />
+                          )}
+                          <Box style={{ flex: 1, minWidth: 0 }}>
+                            <Text size="sm" fw={500} truncate>
+                              {f.filename}
+                            </Text>
+                            <Group gap="xs">
+                              <Text size="xs" c="dimmed">
+                                {formatSize(f.size)}
+                              </Text>
+                              {job && job.status === 'completed' && (
+                                <Text size="xs" c="dimmed">
+                                  · {job.importedCount} links
+                                </Text>
+                              )}
+                              {job && job.status === 'processing' && (
+                                <Text size="xs" c="dimmed">
+                                  · {job.importedCount} parsed
+                                </Text>
+                              )}
+                            </Group>
+                          </Box>
                         </Group>
-                      </Box>
-                      <ActionIcon
-                        size="xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(f.filename)
-                        }}
-                        title="Delete"
-                      >
-                        ✕
-                      </ActionIcon>
-                    </Group>
-                  </Box>
-                ))}
+                        <ActionIcon
+                          size="xs"
+                          variant="subtle"
+                          color="red"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDelete(f.filename)
+                          }}
+                          title="Delete"
+                        >
+                          ✕
+                        </ActionIcon>
+                      </Group>
+                    </Box>
+                  )
+                })}
               </Stack>
             </ScrollArea.Autosize>
           </Card>
 
-          {/* Right: file content */}
+          {/* Right: parse toolbar + file content */}
           <Card withBorder p={0} style={{ flex: 1, minWidth: 0 }}>
             {!selected ? (
               <Text c="dimmed" ta="center" py="xl">
                 Select a file to view its content
               </Text>
-            ) : loadingContent ? (
-              <Box
-                py="xl"
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Loader />
-              </Box>
-            ) : contentError ? (
-              <Text c="red" ta="center" py="xl">
-                {contentError}
-              </Text>
             ) : (
-              <VirtualLineViewer lines={allLines} filename={selected} />
+              <Stack gap={0}>
+                <ParseToolbar
+                  filename={selected}
+                  job={selectedJob}
+                  progress={selectedJob ? (progressByJob[selectedJob.jobId] ?? null) : null}
+                  foreground={foregroundJob === (selectedJob?.jobId ?? '')}
+                  backgroundRunning={selectedJob ? backgroundJobs.has(selectedJob.jobId) : false}
+                  anyForeground={foregroundJob !== null}
+                  parseType={parseType}
+                  parseStrategy={parseStrategy}
+                  background={background}
+                  contentError={contentError}
+                  onTypeChange={setParseType}
+                  onStrategyChange={setParseStrategy}
+                  onBackgroundChange={setBackground}
+                  onParse={() => {
+                    if (!selectedJob) return
+                    runParse(selectedJob.jobId, { background })
+                  }}
+                  onStop={() => {
+                    if (!selectedJob) return
+                    stopRef.current.add(selectedJob.jobId)
+                  }}
+                />
+                <Divider />
+                <Box style={{ flex: 1, minHeight: 0 }}>
+                  {loadingContent ? (
+                    <Box py="xl" style={{ display: 'flex', justifyContent: 'center' }}>
+                      <Loader />
+                    </Box>
+                  ) : contentError && !selectedJob ? (
+                    <Text c="red" ta="center" py="xl">
+                      {contentError}
+                    </Text>
+                  ) : (
+                    <VirtualLineViewer lines={allLines} filename={selected} />
+                  )}
+                </Box>
+              </Stack>
             )}
           </Card>
         </Group>
@@ -214,15 +375,146 @@ function SourcesTab() {
   )
 }
 
+function setWithout(prev: Set<string>, id: string): Set<string> {
+  const next = new Set(prev)
+  next.delete(id)
+  return next
+}
+
+function ParseToolbar({
+  filename,
+  job,
+  progress,
+  foreground,
+  backgroundRunning,
+  anyForeground,
+  parseType,
+  parseStrategy,
+  background,
+  contentError,
+  onTypeChange,
+  onStrategyChange,
+  onBackgroundChange,
+  onParse,
+  onStop,
+}: {
+  filename: string
+  job: ImportJobInfo | null
+  progress: ParseProgress | null
+  foreground: boolean
+  backgroundRunning: boolean
+  anyForeground: boolean
+  parseType: JobType
+  parseStrategy: JobStrategy
+  background: boolean
+  contentError: string
+  onTypeChange: (v: JobType) => void
+  onStrategyChange: (v: JobStrategy) => void
+  onBackgroundChange: (v: boolean) => void
+  onParse: () => void
+  onStop: () => void
+}) {
+  const isRunning = foreground || backgroundRunning
+  const status = job?.status
+  const isCompleted = status === 'completed'
+  const isProcessing = status === 'processing'
+  const blocked = anyForeground && !foreground
+
+  const buttonLabel = isCompleted
+    ? 'Parsed ✓'
+    : foreground
+      ? 'Parsing…'
+      : backgroundRunning
+        ? 'Stop'
+        : isProcessing && job && job.importedCount > 0
+          ? 'Resume'
+          : 'Parse'
+
+  const buttonAction = isRunning ? onStop : onParse
+  const buttonColor = backgroundRunning ? 'red' : isCompleted ? 'green' : 'blue'
+
+  return (
+    <Box px="md" py="sm">
+      <Stack gap="xs">
+        <Group justify="space-between" wrap="nowrap">
+          <Group gap="sm" wrap="nowrap">
+            {/* <Text size="sm" fw={600} truncate maw={300}>
+              {filename}
+            </Text> */}
+            {job && (
+              <Badge color={statusMeta[job.status].color} variant="light">
+                {statusMeta[job.status].label}
+              </Badge>
+            )}
+          </Group>
+          <Group gap="xs" wrap="nowrap">
+            <SegmentedControl
+              size="xs"
+              disabled={isCompleted || isRunning || blocked}
+              value={parseType}
+              onChange={(v) => onTypeChange(v as JobType)}
+              data={['TXT', 'JSON']}
+            />
+            <Select
+              size="xs"
+              w={130}
+              disabled={isCompleted || isRunning || blocked}
+              value={parseStrategy}
+              onChange={(v) => v && onStrategyChange(v as JobStrategy)}
+              data={[
+                { value: 'strict', label: 'Strict' },
+                { value: 'normalized', label: 'Normalized' },
+                { value: 'smart', label: 'Smart' },
+              ]}
+            />
+            <Switch
+              size="xs"
+              label="Background"
+              disabled={isCompleted || isRunning || blocked}
+              checked={background}
+              onChange={(e) => onBackgroundChange(e.currentTarget.checked)}
+            />
+            <Button
+              size="xs"
+              color={buttonColor}
+              loading={foreground}
+              disabled={isCompleted || blocked}
+              onClick={buttonAction}
+            >
+              {buttonLabel}
+            </Button>
+          </Group>
+        </Group>
+
+        {progress && (
+          <Group gap="sm" align="center">
+            <Progress
+              value={progress.total > 0 ? (progress.imported / progress.total) * 100 : 0}
+              size="sm"
+              style={{ flex: 1 }}
+              color={isCompleted ? 'green' : 'blue'}
+            />
+            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+              {progress.imported.toLocaleString()} / {progress.total.toLocaleString()}
+              {progress.error > 0 && ` · invalid: ${progress.error}`}
+            </Text>
+          </Group>
+        )}
+
+        {contentError && (
+          <Text size="xs" c="red">
+            {contentError}
+          </Text>
+        )}
+      </Stack>
+    </Box>
+  )
+}
+
 function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [fileContent, setFileContent] = useState('')
-  const [fileType, setFileType] = useState<'TXT' | 'JSON'>('TXT')
   const [isImporting, setIsImporting] = useState(false)
-  const [result, setResult] = useState<{
-    importedCount: number
-    invalid: string[]
-  } | null>(null)
   const [error, setError] = useState('')
 
   const resetRef = useRef<() => void>(null)
@@ -231,8 +523,6 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
     setFile(null)
     setFileContent('')
     setError('')
-    setResult(null)
-    setFileType('TXT')
     resetRef.current?.()
   }, [])
 
@@ -245,14 +535,6 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
     if (!selected) return
     setFile(selected)
     setError('')
-    setResult(null)
-
-    const ext = selected.name.split('.').pop()
-    if (ext === 'json') {
-      setFileType('JSON')
-    } else {
-      setFileType('TXT')
-    }
     try {
       const text = await selected.text()
       setFileContent(text)
@@ -269,14 +551,7 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
         return
       }
       setError('')
-      setResult(null)
       setFileContent(text)
-      const trimmed = text.trim()
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        setFileType('JSON')
-      } else {
-        setFileType('TXT')
-      }
     } catch {
       setError('Failed to read from clipboard')
     }
@@ -286,16 +561,12 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
     if (!fileContent) return
     setIsImporting(true)
     setError('')
-    setResult(null)
-
     try {
-      const res = await trpc.import.create.mutate({
-        type: fileType,
+      await trpc.import.create.mutate({
         content: fileContent,
-        strategy: 'normalized',
         filename: file?.name || undefined,
       })
-      setResult({ importedCount: res.importedCount, invalid: res.invalid })
+      handleClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -304,12 +575,13 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
   }
 
   return (
-    <Modal opened={opened} onClose={handleClose} title="Import Links" size="lg">
+    <Modal opened={opened} onClose={handleClose} title="Import Source File" size="lg">
       <Stack gap="md">
         <Card withBorder>
           <Text fw={500}>Select File or Paste</Text>
           <Text size="sm" c="dimmed">
-            Upload .txt/.json file or paste content from clipboard
+            Save a .txt/.json file or clipboard content. Parsing happens later from the Files
+            toolbar.
           </Text>
           <Stack mt="xs">
             <FileInput
@@ -324,22 +596,12 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
           </Stack>
         </Card>
 
-        <Card withBorder>
-          <Text fw={500}>File Type</Text>
-          <SegmentedControl
-            value={fileType}
-            onChange={(v) => setFileType(v as 'TXT' | 'JSON')}
-            data={['TXT', 'JSON']}
-          />
-        </Card>
-
         {fileContent && (
           <Card withBorder>
             <Group justify="space-between" mb="xs">
               <Text fw={500}>Content Preview</Text>
               <UnstyledButton onClick={reset}>Clear</UnstyledButton>
             </Group>
-
             <Stack>
               <Code block mah="12rem">
                 {fileContent.slice(0, 2000)}
@@ -364,13 +626,6 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
         {error && (
           <Alert color="red" title="Import Failed">
             {error}
-          </Alert>
-        )}
-
-        {result && (
-          <Alert color="green" title="Import Successful!">
-            <Text size="sm">Imported: {result.importedCount} links</Text>
-            {result.invalid.length > 0 && <Text size="sm">Invalid: {result.invalid.length}</Text>}
           </Alert>
         )}
       </Stack>
@@ -431,7 +686,12 @@ function ResolvedTab() {
 
   return (
     <Card withBorder p={0}>
-      <ResolvedLineViewer urls={urls} total={total} onLoadMore={loadMore} loadingMore={loadingMore} />
+      <ResolvedLineViewer
+        urls={urls}
+        total={total}
+        onLoadMore={loadMore}
+        loadingMore={loadingMore}
+      />
     </Card>
   )
 }
@@ -460,7 +720,12 @@ function ResolvedLineViewer({
   const virtualItems = virtualizer.getVirtualItems()
   const lastVisibleIndex = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1].index : 0
 
-  if (lastVisibleIndex >= urls.length - 20 && urls.length < total && !loadingMore && !loadingTriggered.current) {
+  if (
+    lastVisibleIndex >= urls.length - 20 &&
+    urls.length < total &&
+    !loadingMore &&
+    !loadingTriggered.current
+  ) {
     loadingTriggered.current = true
     onLoadMore()
   }
@@ -564,7 +829,7 @@ function VirtualLineViewer({ lines, filename }: { lines: string[]; filename: str
     <>
       <Box px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
         <Group justify="space-between">
-          <Text size="sm" fw={500} truncate>
+          <Text size="xs" c="dimmed" truncate>
             {filename}
           </Text>
           <Text size="xs" c="dimmed">
@@ -575,7 +840,7 @@ function VirtualLineViewer({ lines, filename }: { lines: string[]; filename: str
       <Box
         ref={parentRef}
         style={{
-          height: `calc(100vh - 260px)`,
+          height: `calc(100vh - 320px)`,
           overflow: 'auto',
         }}
       >

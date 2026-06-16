@@ -1,9 +1,5 @@
-# Link Import
+## MODIFIED Requirements
 
-## Purpose
-
-Import links from files or clipboard, deduplicate during import, and persist source content.
-## Requirements
 ### Requirement: Import links from file or clipboard
 The system SHALL accept a source file upload or clipboard paste, persist the raw content to the `data/files/` directory, and create an `importJobs` row with `status='pending'`. The import step SHALL NOT extract URLs, validate them, or insert any links — parsing is deferred to the `link-parse` capability. The procedure SHALL infer the default `type` from the filename suffix (`.json` → JSON, otherwise TXT) when not provided, and default the `strategy` to `normalized`.
 
@@ -23,14 +19,8 @@ The system SHALL accept a source file upload or clipboard paste, persist the raw
 - **WHEN** an import completes
 - **THEN** the links table is unchanged and the job remains `pending` until the user explicitly triggers parsing from the Files page
 
-### Requirement: Persist source content to disk
-The system SHALL persist imported raw file content to the `data/files/` directory, with filenames formatted as `{timestamp}-{originalFilename}`.
+## REMOVED Requirements
 
-#### Scenario: File upload import
-- **WHEN** the user uploads a file `bookmarks.json`
-- **THEN** the file content is written to `data/files/{timestamp}-bookmarks.json`
-
-#### Scenario: Clipboard import
-- **WHEN** the user imports from clipboard
-- **THEN** the content is written to `data/files/clipboard-{timestamp}.txt`
-
+### Requirement: Dedup strategy on import
+**Reason**: Import no longer extracts URLs or inserts links, so deduplication/normalization strategy is no longer applied at import time. Strategy selection now happens at parse time and is covered by the `link-parse` capability (the job stores a default strategy that `parse.start` can override).
+**Migration**: Callers that relied on import returning an `importedCount` or applying a strategy must instead trigger `parse.start` + `parse.batch` after import. The existing Files ImportModal is updated in this change to remove the strategy selector and result panel.
