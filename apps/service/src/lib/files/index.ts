@@ -86,3 +86,34 @@ export async function listFiles(): Promise<FileInfo[]> {
   results.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt))
   return results
 }
+
+/**
+ * Flat list of { filename, size } for every file under FILES_DIR.
+ * Used by the Files prune dryRun to compute totals + sample.
+ */
+export async function listAllFilesWithSize(): Promise<{ filename: string; size: number }[]> {
+  const files = await listFiles()
+  return files.map((f) => ({ filename: f.filename, size: f.size }))
+}
+
+/**
+ * Delete every file under FILES_DIR. Returns the count actually removed and a
+ * per-file error list (filesystem is not transactional — best-effort delete
+ * continues on partial failures). Uses `rm({ force: true })` so files that
+ * disappeared between listing and unlinking do not throw.
+ */
+export async function deleteAllFiles(): Promise<{ filesDeleted: number; errors: string[] }> {
+  const files = await listAllFilesWithSize()
+  const errors: string[] = []
+  let filesDeleted = 0
+  for (const file of files) {
+    try {
+      const abs = resolveFilePath(file.filename)
+      await fs.promises.rm(abs, { force: true })
+      filesDeleted++
+    } catch (err) {
+      errors.push(`${file.filename}: ${(err as Error).message}`)
+    }
+  }
+  return { filesDeleted, errors }
+}

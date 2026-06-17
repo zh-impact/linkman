@@ -6,6 +6,7 @@ import { FilterPage } from './pages/Filter'
 import { HistoryPage } from './pages/History'
 import { HomePage } from './pages/Home'
 import { LinksPage } from './pages/Links'
+import { SettingsPage } from './pages/Settings'
 
 export function Router() {
   return (
@@ -18,6 +19,7 @@ export function Router() {
           <Route path="/dedup" element={<DedupPage />} />
           <Route path="/filter" element={<FilterPage />} />
           <Route path="/history" element={<HistoryPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

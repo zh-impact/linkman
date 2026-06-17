@@ -52,6 +52,15 @@ export function RootLayout() {
                   </UnstyledButton>
                 </Group>
               </Group>
+              <Group gap="xs" wrap="nowrap">
+                {/* TODO: replace ⚙ with @tabler/icons-react IconSettings once the lib is added */}
+                <UnstyledButton component={NavLink} to="/settings" className={classes.control}>
+                  <Text span style={{ marginRight: 4 }}>
+                    ⚙
+                  </Text>
+                  Settings
+                </UnstyledButton>
+              </Group>
             </Group>
           </Container>
         </AppShell.Header>

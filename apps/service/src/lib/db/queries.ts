@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, like, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, like, or, sql } from 'drizzle-orm'
 import { db } from './client'
 import { importJobs, linksTable, operations, snapshots, testJobs, testResults } from './schema'
 
@@ -281,6 +281,36 @@ export async function listImportJobs() {
   return db.select().from(importJobs).orderBy(desc(importJobs.createdAt)).all()
 }
 
+export async function sampleImportJobs(limit = 10) {
+  return db
+    .select({
+      id: importJobs.id,
+      type: importJobs.type,
+      sourceContent: importJobs.sourceContent,
+      strategy: importJobs.strategy,
+      status: importJobs.status,
+      importedCount: importJobs.importedCount,
+      createdAt: importJobs.createdAt,
+    })
+    .from(importJobs)
+    .orderBy(desc(importJobs.createdAt))
+    .limit(limit)
+    .all()
+}
+
+/**
+ * Delete import_jobs whose `source_content` matches one of the given filenames.
+ * Used by the Files prune execute to remove job rows for deleted files.
+ */
+export async function deleteImportJobsByFilenames(filenames: string[]) {
+  if (filenames.length === 0) return 0
+  const result = await db
+    .delete(importJobs)
+    .where(inArray(importJobs.sourceContent, filenames))
+    .run()
+  return result.rowsAffected
+}
+
 // TestJob queries
 export async function insertTestJob(data: typeof testJobs.$inferInsert) {
   return db.insert(testJobs).values(data).run()
@@ -343,4 +373,263 @@ export async function getSnapshotBeforeOperation(operationId: string) {
     .orderBy(desc(snapshots.createdAt))
     .limit(1)
     .get()
+}
+
+// --- Audit-history prune helpers ---
+// Used by the `audit` prune kind (design.md D10) to clear operations + snapshots
+// in a single transaction. Independent of the `database` prune kind, which
+// intentionally preserves audit history.
+
+export async function countAllSnapshots() {
+  return db.select({ count: sql<number>`count(*)` }).from(snapshots).get()
+}
+
+export async function sampleOperations(limit = 10) {
+  return db
+    .select({
+      id: operations.id,
+      type: operations.type,
+      jobId: operations.jobId,
+      timestamp: operations.timestamp,
+      statsInputCount: operations.statsInputCount,
+      statsOutputCount: operations.statsOutputCount,
+    })
+    .from(operations)
+    .orderBy(desc(operations.timestamp))
+    .limit(limit)
+    .all()
+}
+
+export async function sampleSnapshots(limit = 10) {
+  return db
+    .select({
+      id: snapshots.id,
+      createdAt: snapshots.createdAt,
+      linkCount: sql<number>`json_array_length(${snapshots.linkIds})`,
+    })
+    .from(snapshots)
+    .orderBy(desc(snapshots.createdAt))
+    .limit(limit)
+    .all()
+}
+
+export async function deleteAllSnapshots() {
+  const result = await db.delete(snapshots).run()
+  return result.rowsAffected
+}
+
+/**
+ * Clear `operations` and `snapshots` in a single transaction. Neither table
+ * is referenced by foreign keys from elsewhere, so no cascades apply.
+ */
+export async function clearAuditHistory() {
+  return db.transaction(async (tx) => {
+    const opsResult = await tx.delete(operations).run()
+    const snapshotsResult = await tx.delete(snapshots).run()
+    return {
+      operationsDeleted: opsResult.rowsAffected,
+      snapshotsDeleted: snapshotsResult.rowsAffected,
+    }
+  })
+}
+
+// ============================================================================
+// Prune helpers
+//
+// All count helpers return `{ count: number } | undefined` (drizzle `.get()`
+// returns undefined on empty result). All delete helpers return the SQLite
+// `changes` count — number of rows actually removed.
+//
+// test_results.linkId has `onDelete: 'cascade'`, so deleting links automatically
+// removes their test_results. The cascade-count helpers below are purely for
+// dryRun preview display — they tell the user "this will also delete N test
+// results" before they confirm.
+// ============================================================================
+
+// --- Counts (links layer) ---
+
+export async function countDuplicateLinks() {
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(linksTable)
+    .where(isNotNull(linksTable.duplicateOf))
+    .get()
+}
+
+export async function countInternalLinks() {
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(linksTable)
+    .where(eq(linksTable.isInternal, true))
+    .get()
+}
+
+export async function countLinksByDomains(domains: string[]) {
+  if (domains.length === 0) return { count: 0 }
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(linksTable)
+    .where(inArray(linksTable.domain, domains))
+    .get()
+}
+
+export async function countAllLinks() {
+  return db.select({ count: sql<number>`count(*)` }).from(linksTable).get()
+}
+
+export async function countAllImportJobs() {
+  return db.select({ count: sql<number>`count(*)` }).from(importJobs).get()
+}
+
+export async function listDomainsWithCounts() {
+  return db
+    .select({ domain: linksTable.domain, count: sql<number>`count(*)` })
+    .from(linksTable)
+    .groupBy(linksTable.domain)
+    .orderBy(desc(sql<number>`count(*)`))
+    .all()
+}
+
+// --- Cascade counts (test_results joined to filtered links) ---
+
+export async function countTestResultsForDuplicateLinks() {
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(testResults)
+    .innerJoin(linksTable, eq(testResults.linkId, linksTable.id))
+    .where(isNotNull(linksTable.duplicateOf))
+    .get()
+}
+
+export async function countTestResultsForInternalLinks() {
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(testResults)
+    .innerJoin(linksTable, eq(testResults.linkId, linksTable.id))
+    .where(eq(linksTable.isInternal, true))
+    .get()
+}
+
+export async function countTestResultsForDomains(domains: string[]) {
+  if (domains.length === 0) return { count: 0 }
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(testResults)
+    .innerJoin(linksTable, eq(testResults.linkId, linksTable.id))
+    .where(inArray(linksTable.domain, domains))
+    .get()
+}
+
+export async function countAllTestResults() {
+  return db.select({ count: sql<number>`count(*)` }).from(testResults).get()
+}
+
+// --- Samples (first N by createdAt desc, for dryRun preview) ---
+
+const PRUNE_SAMPLE_LIMIT = 10
+
+export async function sampleDuplicateLinks(limit = PRUNE_SAMPLE_LIMIT) {
+  return db
+    .select({
+      id: linksTable.id,
+      originalUrl: linksTable.originalUrl,
+      domain: linksTable.domain,
+      status: linksTable.status,
+      duplicateOf: linksTable.duplicateOf,
+      createdAt: linksTable.createdAt,
+    })
+    .from(linksTable)
+    .where(isNotNull(linksTable.duplicateOf))
+    .orderBy(desc(linksTable.createdAt))
+    .limit(limit)
+    .all()
+}
+
+export async function sampleInternalLinks(limit = PRUNE_SAMPLE_LIMIT) {
+  return db
+    .select({
+      id: linksTable.id,
+      originalUrl: linksTable.originalUrl,
+      domain: linksTable.domain,
+      status: linksTable.status,
+      createdAt: linksTable.createdAt,
+    })
+    .from(linksTable)
+    .where(eq(linksTable.isInternal, true))
+    .orderBy(desc(linksTable.createdAt))
+    .limit(limit)
+    .all()
+}
+
+export async function sampleLinksByDomains(domains: string[], limit = PRUNE_SAMPLE_LIMIT) {
+  if (domains.length === 0) return []
+  return db
+    .select({
+      id: linksTable.id,
+      originalUrl: linksTable.originalUrl,
+      domain: linksTable.domain,
+      status: linksTable.status,
+      createdAt: linksTable.createdAt,
+    })
+    .from(linksTable)
+    .where(inArray(linksTable.domain, domains))
+    .orderBy(desc(linksTable.createdAt))
+    .limit(limit)
+    .all()
+}
+
+export async function sampleAllLinks(limit = PRUNE_SAMPLE_LIMIT) {
+  return db
+    .select({
+      id: linksTable.id,
+      originalUrl: linksTable.originalUrl,
+      domain: linksTable.domain,
+      status: linksTable.status,
+      createdAt: linksTable.createdAt,
+    })
+    .from(linksTable)
+    .orderBy(desc(linksTable.createdAt))
+    .limit(limit)
+    .all()
+}
+
+// --- Deletes (return number of rows removed) ---
+
+export async function deleteDuplicateLinks() {
+  const result = await db.delete(linksTable).where(isNotNull(linksTable.duplicateOf)).run()
+  return result.rowsAffected
+}
+
+export async function deleteInternalLinks() {
+  const result = await db.delete(linksTable).where(eq(linksTable.isInternal, true)).run()
+  return result.rowsAffected
+}
+
+export async function deleteLinksByDomains(domains: string[]) {
+  if (domains.length === 0) return 0
+  // inArray on domain — domains list is small enough (bounded by user selection)
+  // that a single statement is fine. No need for the 500-row batch pattern
+  // used by deleteLinksByIds (which exists for very large id arrays).
+  const result = await db.delete(linksTable).where(inArray(linksTable.domain, domains)).run()
+  return result.rowsAffected
+}
+
+export async function deleteAllLinks() {
+  const result = await db.delete(linksTable).run()
+  return result.rowsAffected
+}
+
+// --- Database prune: atomic clear of links + import_jobs ---
+
+/**
+ * Clear the `links` and `import_jobs` tables in a single transaction.
+ * Preserves `operations` and `snapshots` (audit history). Cascades
+ * `test_results` via FK on link deletion. Returns the row counts removed.
+ */
+export async function clearLinksAndImportJobs() {
+  return db.transaction(async (tx) => {
+    const linksResult = await tx.delete(linksTable).run()
+    const jobsResult = await tx.delete(importJobs).run()
+    return { linksDeleted: linksResult.rowsAffected, jobsDeleted: jobsResult.rowsAffected }
+  })
 }
