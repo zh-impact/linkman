@@ -1,4 +1,5 @@
 import { deduplicateRouter } from './routes/deduplicate'
+import { exportRouter } from './routes/export'
 import { filesRouter } from './routes/files'
 import { filterRouter } from './routes/filter'
 import { importRouter } from './routes/import'
@@ -17,6 +18,7 @@ export const appRouter = router({
   operations: operationsRouter,
   files: filesRouter,
   prune: pruneRouter,
+  export: exportRouter,
 })
 
 export type AppRouter = typeof appRouter

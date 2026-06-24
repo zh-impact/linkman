@@ -6,9 +6,13 @@ const filePath = DATABASE_PATH.startsWith('file:') ? DATABASE_PATH.slice(5) : DA
 const dataDir = path.resolve(path.dirname(filePath))
 
 export const FILES_DIR = path.join(dataDir, 'files')
+export const EXPORTS_DIR = path.join(dataDir, 'exports')
 
 if (!fs.existsSync(FILES_DIR)) {
   fs.mkdirSync(FILES_DIR, { recursive: true })
+}
+if (!fs.existsSync(EXPORTS_DIR)) {
+  fs.mkdirSync(EXPORTS_DIR, { recursive: true })
 }
 
 export interface FileInfo {
@@ -29,8 +33,40 @@ export function resolveFilePath(relativePath: string): string {
   return resolved
 }
 
+/**
+ * Resolve a path under `data/exports/`. Same path-traversal guard as
+ * `resolveFilePath`. Used by `export.run` when `saveToExports` is true.
+ * `data/exports/` is intentionally separate from `FILES_DIR` so export
+ * artifacts never appear in the Sources file list (which walks `FILES_DIR`).
+ */
+export function resolveExportPath(relativePath: string): string {
+  const normalized = path.normalize(relativePath)
+  if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+    throw new Error(`Invalid export path: ${relativePath}`)
+  }
+  const resolved = path.resolve(EXPORTS_DIR, normalized)
+  if (!resolved.startsWith(EXPORTS_DIR + path.sep) && resolved !== EXPORTS_DIR) {
+    throw new Error(`Invalid export path: ${relativePath}`)
+  }
+  return resolved
+}
+
 export async function writeFile(relativePath: string, content: string): Promise<void> {
   const absPath = resolveFilePath(relativePath)
+  const dir = path.dirname(absPath)
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
+  await fs.promises.writeFile(absPath, content, 'utf-8')
+}
+
+/**
+ * Write a JSON export artifact under `data/exports/`. Mirrors `writeFile`
+ * semantics: mkdir parent if missing, utf-8 write. Path safety is enforced
+ * by `resolveExportPath`.
+ */
+export async function writeExportFile(relativePath: string, content: string): Promise<void> {
+  const absPath = resolveExportPath(relativePath)
   const dir = path.dirname(absPath)
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true })

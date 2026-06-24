@@ -28,6 +28,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
+import { ExportTab } from './files/ExportTab'
 
 type JobStatus = 'pending' | 'processing' | 'completed' | 'failed'
 type JobType = 'TXT' | 'JSON'
@@ -80,6 +81,7 @@ export function FilesPage() {
         <Tabs.List mb="md">
           <Tabs.Tab value="sources">Sources</Tabs.Tab>
           <Tabs.Tab value="resolved">Resolved</Tabs.Tab>
+          <Tabs.Tab value="export">Export</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="sources">
@@ -88,6 +90,10 @@ export function FilesPage() {
 
         <Tabs.Panel value="resolved">
           <ResolvedTab />
+        </Tabs.Panel>
+
+        <Tabs.Panel value="export">
+          <ExportTab />
         </Tabs.Panel>
       </Tabs>
     </Container>

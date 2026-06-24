@@ -11,6 +11,7 @@ import {
   updateImportJob,
 } from '../lib/db/queries'
 import { readFile, writeFile } from '../lib/files'
+import { resolveImportType } from '../lib/import/extractors'
 import {
   clearCachedUrls,
   extractLinks,
@@ -66,8 +67,7 @@ export const importRouter = router({
       }),
     )
     .mutation(async ({ input }) => {
-      const type: ImportType =
-        input.type ?? (input.filename?.toLowerCase().endsWith('.json') ? 'JSON' : 'TXT')
+      const type: ImportType = resolveImportType(input.filename, input.content, input.type)
 
       const ts = Math.floor(Date.now() / 1000).toString()
       const sanitized = (input.filename || '').replace(/[/\\]/g, '-').replace(/\s+/g, '-')
@@ -283,15 +283,17 @@ export const importRouter = router({
       }
 
       // Reject if the file isn't actually on disk — otherwise we'd create
-      // a job that parse.start can never fulfil.
+      // a job that parse.start can never fulfil. Reuse the bytes we just
+      // read for content-sniff type resolution (catches JSON-content-under-
+      // .txt cases like Tablerone's `tablerone_backup_<ts>.txt`).
+      let content: string
       try {
-        await readFile(input.filename)
+        content = await readFile(input.filename)
       } catch {
         throw new TRPCError({ code: 'NOT_FOUND', message: `File not found: ${input.filename}` })
       }
 
-      const type: ImportType =
-        input.type ?? (input.filename.toLowerCase().endsWith('.json') ? 'JSON' : 'TXT')
+      const type: ImportType = resolveImportType(input.filename, content, input.type)
       const strategy: ImportStrategy = input.strategy ?? 'normalized'
 
       const jobId = uuidv4()

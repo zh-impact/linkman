@@ -88,6 +88,72 @@ export function extractLinks(
   }
 }
 
+/**
+ * Detect-only variant of `extractLinks`. Runs the same registry iteration but
+ * skips the (potentially expensive) `extract` step. Used by `export.classify`
+ * to power the "hide already-standard JSON" filter without paying the full
+ * extraction cost for every file in the list.
+ */
+export function detectFormat(content: string, type: ImportType, filename?: string): LinkFormat {
+  const ctx = buildDetectContext(type, content, filename)
+  for (const extractor of extractorRegistry) {
+    if (extractor.detect(ctx)) return extractor.format
+  }
+  return FALLBACK_FORMAT[type]
+}
+
+/**
+ * Filename substrings whose source is JSON even though the extension is not
+ * `.json`. Currently only Tablerone — its Chrome extension exports JSON
+ * content under `tablerone_backup_<ts>.txt`. Add more entries here as
+ * real-world cases appear.
+ *
+ * Match is case-insensitive substring; combined with the content-sniff
+ * fallback below this is safe — a stray "tablerone" in an unrelated TXT
+ * filename still gets re-checked via content sniff.
+ */
+const JSON_FILENAME_PATTERNS: RegExp[] = [/tablerone/i]
+
+/** Bytes of content to peek at when sniffing for JSON shape. Cheap upper
+ *  bound — we only need the first non-whitespace character. */
+const CONTENT_SNIFF_HEAD = 64
+
+/**
+ * Resolve the `ImportType` to feed into `extractLinks` / `detectFormat`.
+ * Single source of truth for type detection, used by both the Import flow
+ * (`import.create` / `import.ensureJob`) and the Export flow
+ * (`export.{classify, preview, run}`).
+ *
+ * Order of precedence:
+ * 1. `override` — e.g. the type stored on an existing `import_jobs` row.
+ *    The user (or an earlier flow) has already decided; we honor it.
+ * 2. Filename pattern match — catches known wrong-extension cases
+ *    (`tablerone_backup_*.txt`) without needing to read the file.
+ * 3. Content sniff — if content was supplied and its first non-whitespace
+ *    character is `{` or `[`, treat as JSON. Catches the general
+ *    "JSON content saved under a .txt extension" case.
+ * 4. Extension default (`.json` → JSON, otherwise TXT).
+ */
+export function resolveImportType(
+  filename: string | undefined,
+  content: string | undefined,
+  override?: ImportType,
+): ImportType {
+  if (override) return override
+
+  if (filename) {
+    const base = filename.slice(Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\')) + 1)
+    if (JSON_FILENAME_PATTERNS.some((re) => re.test(base))) return 'JSON'
+  }
+
+  if (content) {
+    const head = content.slice(0, CONTENT_SNIFF_HEAD).trimStart()
+    if (head.startsWith('{') || head.startsWith('[')) return 'JSON'
+  }
+
+  return filename?.toLowerCase().endsWith('.json') ? 'JSON' : 'TXT'
+}
+
 export { bookmarksHtmlExtractor } from './bookmarks-html'
 export { csvExtractor } from './csv'
 export { dashExtractor } from './dash'
