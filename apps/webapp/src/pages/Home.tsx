@@ -1,15 +1,4 @@
-import {
-  Badge,
-  Button,
-  Card,
-  Container,
-  Grid,
-  Group,
-  Skeleton,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core'
+import { Badge, Button, Card, Container, Grid, Group, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { trpc } from '../utils/trpc-client'

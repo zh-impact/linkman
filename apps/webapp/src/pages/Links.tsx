@@ -239,11 +239,7 @@ function GroupItem({
       >
         {link.originalUrl}
       </a>
-      <Badge
-        color={(statusConfig[link.status]?.color ?? 'gray') as string}
-        variant="light"
-        size="sm"
-      >
+      <Badge color={(statusConfig[link.status]?.color ?? 'gray') as string} variant="light" size="sm">
         {statusConfig[link.status]?.label ?? link.status}
       </Badge>
       <ActionIcon size="xs" variant="subtle" color="red" onClick={onDelete} title="Delete">
@@ -545,21 +541,11 @@ export function LinksPage() {
               All
             </Badge>
             {totalPages > 1 && (
-              <Badge
-                size="sm"
-                variant="light"
-                style={{ cursor: 'pointer' }}
-                onClick={selectAllPages}
-              >
+              <Badge size="sm" variant="light" style={{ cursor: 'pointer' }} onClick={selectAllPages}>
                 All Pages
               </Badge>
             )}
-            <Badge
-              size="sm"
-              variant="light"
-              style={{ cursor: 'pointer' }}
-              onClick={invertSelection}
-            >
+            <Badge size="sm" variant="light" style={{ cursor: 'pointer' }} onClick={invertSelection}>
               Invert
             </Badge>
             <Badge size="sm" variant="light" style={{ cursor: 'pointer' }} onClick={selectNone}>
@@ -625,11 +611,7 @@ export function LinksPage() {
       ) : viewMode === 'table' ? (
         <Stack gap="md">
           <Box style={{ overflowX: 'auto' }}>
-            <Table
-              striped
-              highlightOnHover
-              style={{ tableLayout: 'fixed', width: '100%', minWidth: 900 }}
-            >
+            <Table striped highlightOnHover style={{ tableLayout: 'fixed', width: '100%', minWidth: 900 }}>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th w={40}>
@@ -662,10 +644,7 @@ export function LinksPage() {
                       style={{ height: 48 }}
                     >
                       <Table.Td>
-                        <Checkbox
-                          checked={selectedIds.has(link.id)}
-                          onChange={() => toggleSelect(link.id)}
-                        />
+                        <Checkbox checked={selectedIds.has(link.id)} onChange={() => toggleSelect(link.id)} />
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs" c="dimmed">

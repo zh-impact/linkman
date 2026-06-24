@@ -130,11 +130,7 @@ export function ImportPage() {
 
       <Card withBorder>
         <Text fw={500}>File Type</Text>
-        <SegmentedControl
-          value={fileType}
-          onChange={(v) => setFileType(v)}
-          data={['TXT', 'JSON']}
-        />
+        <SegmentedControl value={fileType} onChange={(v) => setFileType(v)} data={['TXT', 'JSON']} />
       </Card>
 
       {fileContent && (
@@ -164,8 +160,7 @@ export function ImportPage() {
               )}
             </Code>
             <Text c="dimmed" size="xs">
-              {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length}{' '}
-              characters
+              {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length} characters
             </Text>
           </Stack>
         </Card>

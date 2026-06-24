@@ -73,11 +73,7 @@ function GroupCard({
           </Badge>
           <Badge
             color={
-              group.duplicateIds.length >= 4
-                ? 'red'
-                : group.duplicateIds.length >= 2
-                  ? 'orange'
-                  : 'yellow'
+              group.duplicateIds.length >= 4 ? 'red' : group.duplicateIds.length >= 2 ? 'orange' : 'yellow'
             }
             size="sm"
           >
@@ -98,9 +94,7 @@ function GroupCard({
         >
           <Text size="xs" fw={600} c="dimmed" mb={4}>
             All URLs in group (
-            {group.keepUrl === group.normalizedUrl
-              ? 'strict match'
-              : `normalized to: ${group.normalizedUrl}`}
+            {group.keepUrl === group.normalizedUrl ? 'strict match' : `normalized to: ${group.normalizedUrl}`}
             ):
           </Text>
           <Stack gap={2}>

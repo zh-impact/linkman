@@ -151,9 +151,7 @@ export function HistoryPage() {
             {operations.map((op) => {
               const config = typeConfig[op.type] ?? { label: op.type, color: 'gray' }
               const hasChanges =
-                op.changesAdded.length > 0 ||
-                op.changesRemoved.length > 0 ||
-                op.changesModified.length > 0
+                op.changesAdded.length > 0 || op.changesRemoved.length > 0 || op.changesModified.length > 0
 
               return (
                 <Card key={op.id} withBorder p="md">

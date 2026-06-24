@@ -123,13 +123,7 @@ function SimilarGroupCard({
           </Badge>
           <Badge
             color={
-              group.count >= 10
-                ? 'red'
-                : group.count >= 5
-                  ? 'orange'
-                  : group.count >= 3
-                    ? 'yellow'
-                    : 'gray'
+              group.count >= 10 ? 'red' : group.count >= 5 ? 'orange' : group.count >= 3 ? 'yellow' : 'gray'
             }
             size="sm"
           >
@@ -265,8 +259,8 @@ function InternalFilter() {
             Internal Address Detection
           </Text>
           <Text size="sm" c="dimmed" mb="md">
-            Detect links pointing to private IP addresses (localhost, 10.x, 172.16-31.x, 192.168.x,
-            169.254.x) and mark them as internal.
+            Detect links pointing to private IP addresses (localhost, 10.x, 172.16-31.x, 192.168.x, 169.254.x)
+            and mark them as internal.
           </Text>
           <Group>
             <Button onClick={handlePreview} loading={loading}>
@@ -478,8 +472,8 @@ function SimilarFilter() {
             Similarity Detection
           </Text>
           <Text size="sm" c="dimmed" mb="md">
-            Uses domain grouping, path prefix, and edit distance algorithms to detect similar links.
-            Preview to see groups, then select which to filter.
+            Uses domain grouping, path prefix, and edit distance algorithms to detect similar links. Preview
+            to see groups, then select which to filter.
           </Text>
           <Stack>
             <Radio.Group value={method} onChange={(v) => setMethod(v as typeof method)}>
@@ -566,12 +560,7 @@ function SimilarFilter() {
               <Card withBorder>
                 <Group justify="space-between" mb="sm">
                   <Text fw={600}>Groups ({groups.length})</Text>
-                  <Checkbox
-                    label="Select All"
-                    checked={allSelected}
-                    onChange={toggleAllGroups}
-                    size="xs"
-                  />
+                  <Checkbox label="Select All" checked={allSelected} onChange={toggleAllGroups} size="xs" />
                 </Group>
                 {useVirtual ? (
                   <Box ref={scrollRef} mah={400} style={{ overflowY: 'auto' }}>
