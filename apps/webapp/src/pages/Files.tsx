@@ -206,7 +206,11 @@ function SourcesTab() {
         })
         setProgressByJob((prev) => ({
           ...prev,
-          [jobId]: { imported: 0, total: startRes.totalValid, error: startRes.invalidCount },
+          [jobId]: {
+            imported: 0,
+            total: startRes.totalValid,
+            error: startRes.invalidCount,
+          },
         }))
         while (true) {
           if (stopRef.current.has(jobId)) break
@@ -604,8 +608,7 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
         <Card withBorder>
           <Text fw={500}>Select File or Paste</Text>
           <Text size="sm" c="dimmed">
-            Save a .txt/.json file or clipboard content. Parsing happens later from the Files
-            toolbar.
+            Save a .txt/.json file or clipboard content. Parsing happens later from the Files toolbar.
           </Text>
           <Stack mt="xs">
             <FileInput
@@ -636,8 +639,7 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
                 )}
               </Code>
               <Text c="dimmed" size="xs">
-                {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length}{' '}
-                characters
+                {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length} characters
               </Text>
             </Stack>
           </Card>
@@ -669,7 +671,10 @@ function ResolvedTab() {
 
   const fetchPage = useCallback(async (offset: number) => {
     try {
-      const data = await trpc.files.resolved.query({ limit: PAGE_SIZE, offset })
+      const data = await trpc.files.resolved.query({
+        limit: PAGE_SIZE,
+        offset,
+      })
       if (offset === 0) {
         setUrls(data.urls)
         setTotal(data.total)
@@ -710,12 +715,7 @@ function ResolvedTab() {
 
   return (
     <Card withBorder p={0}>
-      <ResolvedLineViewer
-        urls={urls}
-        total={total}
-        onLoadMore={loadMore}
-        loadingMore={loadingMore}
-      />
+      <ResolvedLineViewer urls={urls} total={total} onLoadMore={loadMore} loadingMore={loadingMore} />
     </Card>
   )
 }
@@ -780,7 +780,13 @@ function ResolvedLineViewer({
           overflow: 'auto',
         }}
       >
-        <Box style={{ height: urls.length * 22, width: '100%', position: 'relative' }}>
+        <Box
+          style={{
+            height: urls.length * 22,
+            width: '100%',
+            position: 'relative',
+          }}
+        >
           {virtualItems.map((item) => {
             const url = urls[item.index]
             return (
