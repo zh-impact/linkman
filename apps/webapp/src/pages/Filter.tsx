@@ -18,63 +18,14 @@ import {
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { ExpandableGroupCard } from '../components/ExpandableGroupCard'
+import { VirtualList } from '../components/VirtualList'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
 
 const VIRTUAL_THRESHOLD = 20
 const INNER_VIRTUAL_THRESHOLD = 20
 const ROW_HEIGHT = 20
-
-function VirtualUrlList({ urls }: { urls: string[] }) {
-  const parentRef = useRef<HTMLDivElement>(null)
-  const virtualizer = useVirtualizer({
-    count: urls.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: 10,
-  })
-
-  return (
-    <Box ref={parentRef} mah={300} style={{ overflowY: 'auto' }}>
-      <Box style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-        {virtualizer.getVirtualItems().map((item) => {
-          const url = urls[item.index]
-          return (
-            <Box
-              key={item.key}
-              ref={(el) => {
-                if (el) virtualizer.measureElement(el)
-              }}
-              data-index={item.index}
-              style={{
-                position: 'absolute',
-                top: item.start,
-                left: 0,
-                right: 0,
-              }}
-            >
-              <Text
-                component="a"
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                c={item.index === 0 ? 'green' : 'blue'}
-                td="underline"
-                size="xs"
-                ff="monospace"
-                pl="xs"
-                style={{ display: 'block', wordBreak: 'break-all', lineHeight: '1.4' }}
-              >
-                {item.index === 0 ? '[KEEP] ' : `[${item.index + 1}]  `}
-                {url}
-              </Text>
-            </Box>
-          )
-        })}
-      </Box>
-    </Box>
-  )
-}
 
 function SimilarGroupCard({
   group,
@@ -98,26 +49,13 @@ function SimilarGroupCard({
   const useInnerVirtual = expanded && group.urls.length > INNER_VIRTUAL_THRESHOLD
 
   return (
-    <Card
-      withBorder
-      p="xs"
-      bg={
-        selected
-          ? 'var(--mantine-color-blue-light)'
-          : expanded
-            ? 'var(--mantine-color-violet-light)'
-            : 'var(--mantine-color-gray-light)'
-      }
-    >
-      <Group justify="space-between" onClick={onToggleExpand} style={{ cursor: 'pointer' }}>
-        <Group gap="xs">
-          <Checkbox
-            checked={selected}
-            onChange={(e) => {
-              e.stopPropagation()
-              onToggleSelect()
-            }}
-          />
+    <ExpandableGroupCard
+      expanded={expanded}
+      onToggleExpand={onToggleExpand}
+      selected={selected}
+      onToggleSelect={onToggleSelect}
+      header={
+        <>
           <Badge size="sm" variant="light">
             {group.method}
           </Badge>
@@ -129,48 +67,61 @@ function SimilarGroupCard({
           >
             {group.count} links
           </Badge>
-        </Group>
-        <Group gap="xs">
-          <Text size="xs" c="dimmed" truncate maw={300}>
-            {group.groupKey}
-          </Text>
-        </Group>
-      </Group>
-      {expanded && (
-        <Box
-          mt="xs"
-          pt="xs"
-          style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {useInnerVirtual ? (
-            <VirtualUrlList urls={group.urls} />
-          ) : (
-            <Stack gap={2}>
-              {group.urls.map((url, j) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: URLs may duplicate within a group; index keys are intentional
-                <Text key={j} size="xs" ff="monospace" style={{ wordBreak: 'break-all' }}>
-                  <Text
-                    component="a"
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    c={j === 0 ? 'green' : 'blue'}
-                    td="underline"
-                    size="xs"
-                    span
-                    ff="monospace"
-                  >
-                    {j === 0 ? '[KEEP] ' : `[${j + 1}]  `}
-                    {url}
-                  </Text>
-                </Text>
-              ))}
-            </Stack>
+        </>
+      }
+      headerRight={
+        <Text size="xs" c="dimmed" truncate maw={300}>
+          {group.groupKey}
+        </Text>
+      }
+    >
+      {useInnerVirtual ? (
+        <VirtualList
+          items={group.urls}
+          rowHeight={ROW_HEIGHT}
+          overscan={10}
+          renderItem={(url, idx) => (
+            <Text
+              component="a"
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              c={idx === 0 ? 'green' : 'blue'}
+              td="underline"
+              size="xs"
+              ff="monospace"
+              pl="xs"
+              style={{ display: 'block', wordBreak: 'break-all', lineHeight: '1.4' }}
+            >
+              {idx === 0 ? '[KEEP] ' : `[${idx + 1}]  `}
+              {url}
+            </Text>
           )}
-        </Box>
+        />
+      ) : (
+        <Stack gap={2}>
+          {group.urls.map((url, j) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: URLs may duplicate within a group; index keys are intentional
+            <Text key={j} size="xs" ff="monospace" style={{ wordBreak: 'break-all' }}>
+              <Text
+                component="a"
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                c={j === 0 ? 'green' : 'blue'}
+                td="underline"
+                size="xs"
+                span
+                ff="monospace"
+              >
+                {j === 0 ? '[KEEP] ' : `[${j + 1}]  `}
+                {url}
+              </Text>
+            </Text>
+          ))}
+        </Stack>
       )}
-    </Card>
+    </ExpandableGroupCard>
   )
 }
 

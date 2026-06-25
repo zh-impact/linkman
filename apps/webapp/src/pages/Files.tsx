@@ -24,8 +24,9 @@ import {
   UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
-import { useVirtualizer } from '@tanstack/react-virtual'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { VirtualLine, VirtualList } from '../components/VirtualList'
+import { formatSize } from '../utils/format'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
 import { ExportTab } from './files/ExportTab'
@@ -62,12 +63,6 @@ const statusMeta: Record<JobStatus, { color: string; label: string }> = {
   processing: { color: 'yellow', label: 'Processing' },
   completed: { color: 'green', label: 'Completed' },
   failed: { color: 'red', label: 'Failed' },
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function FilesPage() {
@@ -731,194 +726,89 @@ function ResolvedLineViewer({
   onLoadMore: () => void
   loadingMore: boolean
 }) {
-  const parentRef = useRef<HTMLDivElement>(null)
-  const loadingTriggered = useRef(false)
-
-  const virtualizer = useVirtualizer({
-    count: urls.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 22,
-    overscan: 10,
-  })
-
-  const virtualItems = virtualizer.getVirtualItems()
-  const lastVisibleIndex = virtualItems.length > 0 ? virtualItems[virtualItems.length - 1].index : 0
-
-  if (
-    lastVisibleIndex >= urls.length - 20 &&
-    urls.length < total &&
-    !loadingMore &&
-    !loadingTriggered.current
-  ) {
-    loadingTriggered.current = true
-    onLoadMore()
-  }
-
-  if (!loadingMore) {
-    loadingTriggered.current = false
-  }
-
   return (
-    <>
-      <Box px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
-        <Group justify="space-between">
-          <Text size="sm" fw={500}>
-            Resolved unique URLs
-          </Text>
-          <Group gap="xs">
-            {loadingMore && <Loader size="xs" />}
-            <Text size="xs" c="dimmed">
-              {urls.length.toLocaleString()} / {total.toLocaleString()}
+    <VirtualList
+      items={urls}
+      rowHeight={22}
+      overscan={10}
+      scrollHeight={`calc(100vh - 260px)`}
+      total={total}
+      onLoadMore={onLoadMore}
+      loadingMore={loadingMore}
+      header={
+        <Box px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
+          <Group justify="space-between">
+            <Text size="sm" fw={500}>
+              Resolved unique URLs
             </Text>
+            <Group gap="xs">
+              {loadingMore && <Loader size="xs" />}
+              <Text size="xs" c="dimmed">
+                {urls.length.toLocaleString()} / {total.toLocaleString()}
+              </Text>
+            </Group>
           </Group>
-        </Group>
-      </Box>
-      <Box
-        ref={parentRef}
-        style={{
-          height: `calc(100vh - 260px)`,
-          overflow: 'auto',
-        }}
-      >
-        <Box
-          style={{
-            height: urls.length * 22,
-            width: '100%',
-            position: 'relative',
-          }}
-        >
-          {virtualItems.map((item) => {
-            const url = urls[item.index]
-            return (
-              <Box
-                key={item.key}
-                style={{
-                  position: 'absolute',
-                  top: item.start,
-                  left: 0,
-                  right: 0,
-                  height: 22,
-                  display: 'flex',
-                  fontFamily: 'var(--mantine-font-family-monospace)',
-                  fontSize: 'var(--mantine-font-size-xs)',
-                  lineHeight: '22px',
-                }}
-              >
-                <Text
-                  c="dimmed"
-                  ta="right"
-                  w={60}
-                  px="xs"
-                  style={{
-                    flexShrink: 0,
-                    userSelect: 'none',
-                    borderRight: '1px solid var(--mantine-color-gray-2)',
-                  }}
-                >
-                  {item.index + 1}
-                </Text>
-                <Text
-                  component="a"
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  c="blue"
-                  td="underline"
-                  px="xs"
-                  style={{
-                    flex: 1,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {url}
-                </Text>
-              </Box>
-            )
-          })}
         </Box>
-      </Box>
-    </>
+      }
+      renderItem={(url, idx) => (
+        <VirtualLine index={idx} showLineNumbers>
+          <Text
+            component="a"
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            c="blue"
+            td="underline"
+            px="xs"
+            style={{
+              flex: 1,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {url}
+          </Text>
+        </VirtualLine>
+      )}
+    />
   )
 }
 
 function VirtualLineViewer({ lines, filename }: { lines: string[]; filename: string }) {
-  const parentRef = useRef<HTMLDivElement>(null)
-
-  const virtualizer = useVirtualizer({
-    count: lines.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 22,
-    overscan: 20,
-  })
-
-  const totalHeight = useMemo(() => lines.length * 22, [lines.length])
-
   return (
-    <>
-      <Box px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
-        <Group justify="space-between">
-          <Text size="xs" c="dimmed" truncate>
-            {filename}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {lines.length.toLocaleString()} lines
-          </Text>
-        </Group>
-      </Box>
-      <Box
-        ref={parentRef}
-        style={{
-          height: `calc(100vh - 320px)`,
-          overflow: 'auto',
-        }}
-      >
-        <Box style={{ height: totalHeight, width: '100%', position: 'relative' }}>
-          {virtualizer.getVirtualItems().map((virtualItem) => (
-            <Box
-              key={virtualItem.index}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: 22,
-                transform: `translateY(${virtualItem.index * 22}px)`,
-                display: 'flex',
-                fontFamily: 'var(--mantine-font-family-monospace)',
-                fontSize: 'var(--mantine-font-size-xs)',
-                lineHeight: '22px',
-              }}
-            >
-              <Text
-                c="dimmed"
-                ta="right"
-                w={60}
-                px="xs"
-                style={{
-                  flexShrink: 0,
-                  userSelect: 'none',
-                  borderRight: '1px solid var(--mantine-color-gray-2)',
-                }}
-              >
-                {virtualItem.index + 1}
-              </Text>
-              <Text
-                px="xs"
-                style={{
-                  flex: 1,
-                  whiteSpace: 'pre',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                }}
-              >
-                {lines[virtualItem.index] ?? ''}
-              </Text>
-            </Box>
-          ))}
+    <VirtualList
+      items={lines}
+      rowHeight={22}
+      overscan={20}
+      scrollHeight={`calc(100vh - 320px)`}
+      header={
+        <Box px="md" py="xs" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
+          <Group justify="space-between">
+            <Text size="xs" c="dimmed" truncate>
+              {filename}
+            </Text>
+            <Text size="xs" c="dimmed">
+              {lines.length.toLocaleString()} lines
+            </Text>
+          </Group>
         </Box>
-      </Box>
-    </>
+      }
+      renderItem={(line, idx) => (
+        <VirtualLine index={idx} showLineNumbers>
+          <Text
+            px="xs"
+            style={{
+              flex: 1,
+              whiteSpace: 'pre',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {line}
+          </Text>
+        </VirtualLine>
+      )}
+    />
   )
 }

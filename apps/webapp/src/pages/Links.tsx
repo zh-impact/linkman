@@ -19,37 +19,11 @@ import {
   Title,
 } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
+import { LINK_STATUS_CONFIG, LINK_STATUS_OPTIONS } from '../components/status-config'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'All' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'imported', label: 'Imported' },
-  { value: 'duplicate_removed', label: 'Duplicate' },
-  { value: 'filtered_internal', label: 'Internal' },
-  { value: 'filtered_similar', label: 'Similar' },
-  { value: 'dns_failed', label: 'DNS Failed' },
-  { value: 'connection_refused', label: 'Refused' },
-  { value: 'timeout', label: 'Timeout' },
-  { value: 'success', label: 'Available' },
-  { value: 'error', label: 'Error' },
-]
-
 const PAGE_SIZE = 50
-
-const statusConfig: Record<string, { label: string; color: string }> = {
-  pending: { label: 'Pending', color: 'yellow' },
-  imported: { label: 'Imported', color: 'blue' },
-  duplicate_removed: { label: 'Duplicate', color: 'gray' },
-  filtered_internal: { label: 'Internal', color: 'orange' },
-  filtered_similar: { label: 'Similar', color: 'orange' },
-  dns_failed: { label: 'DNS Failed', color: 'red' },
-  connection_refused: { label: 'Refused', color: 'red' },
-  timeout: { label: 'Timeout', color: 'red' },
-  success: { label: 'Available', color: 'green' },
-  error: { label: 'Error', color: 'red' },
-}
 
 type SortField = 'domain' | 'status' | 'source' | 'createdAt'
 type SortDir = 'asc' | 'desc'
@@ -239,8 +213,8 @@ function GroupItem({
       >
         {link.originalUrl}
       </a>
-      <Badge color={(statusConfig[link.status]?.color ?? 'gray') as string} variant="light" size="sm">
-        {statusConfig[link.status]?.label ?? link.status}
+      <Badge color={(LINK_STATUS_CONFIG[link.status]?.color ?? 'gray') as string} variant="light" size="sm">
+        {LINK_STATUS_CONFIG[link.status]?.label ?? link.status}
       </Badge>
       <ActionIcon size="xs" variant="subtle" color="red" onClick={onDelete} title="Delete">
         ✕
@@ -518,7 +492,7 @@ export function LinksPage() {
         <Button onClick={handleSearch}>Search</Button>
         <Select
           placeholder="Filter by status"
-          data={STATUS_OPTIONS}
+          data={LINK_STATUS_OPTIONS}
           value={status || ''}
           onChange={(v) => {
             setStatus(v || undefined)
@@ -687,11 +661,11 @@ export function LinksPage() {
                       </Table.Td>
                       <Table.Td>
                         <Badge
-                          color={(statusConfig[link.status]?.color ?? 'gray') as string}
+                          color={(LINK_STATUS_CONFIG[link.status]?.color ?? 'gray') as string}
                           variant="light"
                           size="sm"
                         >
-                          {statusConfig[link.status]?.label ?? link.status}
+                          {LINK_STATUS_CONFIG[link.status]?.label ?? link.status}
                         </Badge>
                       </Table.Td>
                       <Table.Td>

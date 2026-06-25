@@ -1,59 +1,9 @@
 import { Badge, Button, Card, Container, Grid, Group, Skeleton, Stack, Text, Title } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { StatsCard } from '../components/StatsCard'
+import { LINK_STATUS_CONFIG, OP_TYPE_CONFIG } from '../components/status-config'
 import { trpc } from '../utils/trpc-client'
-
-const statusLabels: Record<string, string> = {
-  pending: 'Pending',
-  imported: 'Imported',
-  duplicate_removed: 'Duplicate',
-  filtered_internal: 'Internal',
-  filtered_similar: 'Similar',
-  dns_failed: 'DNS Failed',
-  connection_refused: 'Refused',
-  timeout: 'Timeout',
-  success: 'Available',
-  error: 'Error',
-}
-
-const statusColors: Record<string, string> = {
-  pending: 'yellow',
-  imported: 'blue',
-  duplicate_removed: 'gray',
-  filtered_internal: 'orange',
-  filtered_similar: 'orange',
-  dns_failed: 'red',
-  connection_refused: 'red',
-  timeout: 'red',
-  success: 'green',
-  error: 'red',
-}
-
-const opTypeLabels: Record<string, string> = {
-  import: 'Import',
-  deduplicate: 'Deduplicate',
-  filter_internal: 'Filter Internal',
-  filter_similar: 'Filter Similar',
-  test_dns: 'DNS Test',
-  test_head: 'HEAD Test',
-  test_get: 'GET Test',
-  manual_tag: 'Tag',
-  manual_delete: 'Delete',
-  rollback: 'Rollback',
-}
-
-const opTypeColors: Record<string, string> = {
-  import: 'blue',
-  deduplicate: 'orange',
-  filter_internal: 'yellow',
-  filter_similar: 'violet',
-  test_dns: 'teal',
-  test_head: 'teal',
-  test_get: 'teal',
-  manual_tag: 'grape',
-  manual_delete: 'red',
-  rollback: 'gray',
-}
 
 interface RecentOp {
   id: string
@@ -106,33 +56,15 @@ export function HomePage() {
         {/* Top stats cards: Total + 3 highlights */}
         <Grid>
           <Grid.Col span={{ base: 12, sm: 6, md: 3 }}>
-            <Card withBorder p="lg">
-              <Text size="sm" c="dimmed">
-                Total Links
-              </Text>
-              {loading ? (
-                <Skeleton height={28} width="55%" mt="xs" />
-              ) : (
-                <Text fw={700} size="xl" mt="xs">
-                  {total}
-                </Text>
-              )}
-            </Card>
+            <StatsCard label="Total Links" value={total} loading={loading} />
           </Grid.Col>
           {highlightStatuses.map((status) => (
             <Grid.Col key={status} span={{ base: 12, sm: 6, md: 3 }}>
-              <Card withBorder p="lg">
-                <Text size="sm" c="dimmed">
-                  {statusLabels[status]}
-                </Text>
-                {loading ? (
-                  <Skeleton height={28} width="55%" mt="xs" />
-                ) : (
-                  <Text fw={700} size="xl" mt="xs">
-                    {byStatus[status] ?? 0}
-                  </Text>
-                )}
-              </Card>
+              <StatsCard
+                label={LINK_STATUS_CONFIG[status]?.label ?? status}
+                value={byStatus[status] ?? 0}
+                loading={loading}
+              />
             </Grid.Col>
           ))}
         </Grid>
@@ -157,8 +89,8 @@ export function HomePage() {
                 .sort(([, a], [, b]) => b - a)
                 .map(([status, count]) => (
                   <Group key={status} gap="xs">
-                    <Badge color={statusColors[status] ?? 'gray'} variant="light">
-                      {statusLabels[status] ?? status}
+                    <Badge color={LINK_STATUS_CONFIG[status]?.color ?? 'gray'} variant="light">
+                      {LINK_STATUS_CONFIG[status]?.label ?? status}
                     </Badge>
                     <Text size="sm" fw={600}>
                       {count}
@@ -193,8 +125,8 @@ export function HomePage() {
                 <Stack gap="sm">
                   {recentOps.map((op) => (
                     <Group key={op.id} justify="space-between">
-                      <Badge variant="outline" color={opTypeColors[op.type] ?? 'gray'}>
-                        {opTypeLabels[op.type] ?? op.type}
+                      <Badge variant="outline" color={OP_TYPE_CONFIG[op.type]?.color ?? 'gray'}>
+                        {OP_TYPE_CONFIG[op.type]?.label ?? op.type}
                       </Badge>
                       <Text size="xs" c="dimmed">
                         {new Date(`${op.timestamp.replace(' ', 'T')}Z`).toLocaleString()}

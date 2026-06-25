@@ -12,23 +12,11 @@ import {
   Title,
 } from '@mantine/core'
 import { useEffect, useState } from 'react'
+import { OP_TYPE_CONFIG } from '../components/status-config'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
 
 const PAGE_SIZE = 20
-
-const typeConfig: Record<string, { label: string; color: string }> = {
-  import: { label: 'Import', color: 'blue' },
-  deduplicate: { label: 'Deduplicate', color: 'violet' },
-  filter_internal: { label: 'Filter Internal', color: 'orange' },
-  filter_similar: { label: 'Filter Similar', color: 'yellow' },
-  test_dns: { label: 'DNS Test', color: 'teal' },
-  test_head: { label: 'HEAD Test', color: 'teal' },
-  test_get: { label: 'GET Test', color: 'teal' },
-  manual_tag: { label: 'Tag', color: 'gray' },
-  manual_delete: { label: 'Delete', color: 'red' },
-  rollback: { label: 'Rollback', color: 'pink' },
-}
 
 interface OperationItem {
   id: string
@@ -149,7 +137,7 @@ export function HistoryPage() {
         <>
           <Stack gap="sm">
             {operations.map((op) => {
-              const config = typeConfig[op.type] ?? { label: op.type, color: 'gray' }
+              const config = OP_TYPE_CONFIG[op.type] ?? { label: op.type, color: 'gray' }
               const hasChanges =
                 op.changesAdded.length > 0 || op.changesRemoved.length > 0 || op.changesModified.length > 0
 

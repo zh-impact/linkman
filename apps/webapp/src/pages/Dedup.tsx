@@ -16,6 +16,7 @@ import {
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { ExpandableGroupCard } from '../components/ExpandableGroupCard'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
 
@@ -44,101 +45,6 @@ const strategyDescriptions: Record<string, string> = {
 }
 
 const VIRTUAL_THRESHOLD = 20
-
-function GroupCard({
-  group,
-  expanded,
-  onToggle,
-}: {
-  group: {
-    keepId: string
-    duplicateIds: string[]
-    keepUrl: string
-    duplicateUrls: string[]
-    normalizedUrl: string
-  }
-  expanded: boolean
-  onToggle: () => void
-}) {
-  return (
-    <Card
-      withBorder
-      p="xs"
-      bg={expanded ? 'var(--mantine-color-blue-light)' : 'var(--mantine-color-gray-light)'}
-    >
-      <Group justify="space-between" style={{ cursor: 'pointer' }} onClick={onToggle}>
-        <Group gap="xs">
-          <Badge color="green" size="sm">
-            Keep: {group.keepId.slice(0, 8)}
-          </Badge>
-          <Badge
-            color={
-              group.duplicateIds.length >= 4 ? 'red' : group.duplicateIds.length >= 2 ? 'orange' : 'yellow'
-            }
-            size="sm"
-          >
-            {group.duplicateIds.length} duplicate
-            {group.duplicateIds.length > 1 ? 's' : ''}
-          </Badge>
-        </Group>
-        <Text size="xs" c="dimmed" truncate maw={300}>
-          {group.keepUrl}
-        </Text>
-      </Group>
-      {expanded && (
-        <Box
-          mt="xs"
-          pt="xs"
-          style={{ borderTop: '1px solid var(--mantine-color-gray-3)' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Text size="xs" fw={600} c="dimmed" mb={4}>
-            All URLs in group (
-            {group.keepUrl === group.normalizedUrl ? 'strict match' : `normalized to: ${group.normalizedUrl}`}
-            ):
-          </Text>
-          <Stack gap={2}>
-            <Text size="xs" c="green" ff="monospace" style={{ wordBreak: 'break-all' }}>
-              {'[KEEP]'}
-              <Text
-                component="a"
-                href={group.keepUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                c="green"
-                td="underline"
-                size="xs"
-                span
-                ff="monospace"
-              >
-                {group.keepUrl}
-              </Text>
-            </Text>
-            {group.duplicateUrls.map((url, j) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: duplicate URLs may repeat within a group; index keys are intentional
-              <Text key={j} size="xs" c="orange" ff="monospace" style={{ wordBreak: 'break-all' }}>
-                {'[DUP] '}
-                <Text
-                  component="a"
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  c="orange"
-                  td="underline"
-                  size="xs"
-                  span
-                  ff="monospace"
-                >
-                  {url}
-                </Text>
-              </Text>
-            ))}
-          </Stack>
-        </Box>
-      )}
-    </Card>
-  )
-}
 
 export function DedupPage() {
   const [strategy, setStrategy] = useState('normalized')
@@ -394,11 +300,87 @@ export function DedupPage() {
                           }}
                           pb="xs"
                         >
-                          <GroupCard
-                            group={preview.groups[item.index]}
+                          <ExpandableGroupCard
                             expanded={expandedGroups.has(item.index)}
-                            onToggle={() => toggleGroup(item.index)}
-                          />
+                            onToggleExpand={() => toggleGroup(item.index)}
+                            expandedBg="var(--mantine-color-blue-light)"
+                            header={
+                              <>
+                                <Badge color="green" size="sm">
+                                  Keep: {preview.groups[item.index].keepId.slice(0, 8)}
+                                </Badge>
+                                <Badge
+                                  color={
+                                    preview.groups[item.index].duplicateIds.length >= 4
+                                      ? 'red'
+                                      : preview.groups[item.index].duplicateIds.length >= 2
+                                        ? 'orange'
+                                        : 'yellow'
+                                  }
+                                  size="sm"
+                                >
+                                  {preview.groups[item.index].duplicateIds.length} duplicate
+                                  {preview.groups[item.index].duplicateIds.length > 1 ? 's' : ''}
+                                </Badge>
+                              </>
+                            }
+                            headerRight={
+                              <Text size="xs" c="dimmed" truncate maw={300}>
+                                {preview.groups[item.index].keepUrl}
+                              </Text>
+                            }
+                          >
+                            <Text size="xs" fw={600} c="dimmed" mb={4}>
+                              All URLs in group (
+                              {preview.groups[item.index].keepUrl === preview.groups[item.index].normalizedUrl
+                                ? 'strict match'
+                                : `normalized to: ${preview.groups[item.index].normalizedUrl}`}
+                              ):
+                            </Text>
+                            <Stack gap={2}>
+                              <Text size="xs" c="green" ff="monospace" style={{ wordBreak: 'break-all' }}>
+                                {'[KEEP]'}
+                                <Text
+                                  component="a"
+                                  href={preview.groups[item.index].keepUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  c="green"
+                                  td="underline"
+                                  size="xs"
+                                  span
+                                  ff="monospace"
+                                >
+                                  {preview.groups[item.index].keepUrl}
+                                </Text>
+                              </Text>
+                              {preview.groups[item.index].duplicateUrls.map((url, j) => (
+                                <Text
+                                  // biome-ignore lint/suspicious/noArrayIndexKey: duplicate URLs may repeat within a group; index keys are intentional
+                                  key={j}
+                                  size="xs"
+                                  c="orange"
+                                  ff="monospace"
+                                  style={{ wordBreak: 'break-all' }}
+                                >
+                                  {'[DUP] '}
+                                  <Text
+                                    component="a"
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    c="orange"
+                                    td="underline"
+                                    size="xs"
+                                    span
+                                    ff="monospace"
+                                  >
+                                    {url}
+                                  </Text>
+                                </Text>
+                              ))}
+                            </Stack>
+                          </ExpandableGroupCard>
                         </Box>
                       ))}
                     </Box>
@@ -407,12 +389,88 @@ export function DedupPage() {
                   <Box mah={400} style={{ overflowY: 'auto' }}>
                     <Stack gap="xs">
                       {preview.groups.map((group, i) => (
-                        <GroupCard
+                        <ExpandableGroupCard
                           key={group.keepId}
-                          group={group}
                           expanded={expandedGroups.has(i)}
-                          onToggle={() => toggleGroup(i)}
-                        />
+                          onToggleExpand={() => toggleGroup(i)}
+                          expandedBg="var(--mantine-color-blue-light)"
+                          header={
+                            <>
+                              <Badge color="green" size="sm">
+                                Keep: {group.keepId.slice(0, 8)}
+                              </Badge>
+                              <Badge
+                                color={
+                                  group.duplicateIds.length >= 4
+                                    ? 'red'
+                                    : group.duplicateIds.length >= 2
+                                      ? 'orange'
+                                      : 'yellow'
+                                }
+                                size="sm"
+                              >
+                                {group.duplicateIds.length} duplicate
+                                {group.duplicateIds.length > 1 ? 's' : ''}
+                              </Badge>
+                            </>
+                          }
+                          headerRight={
+                            <Text size="xs" c="dimmed" truncate maw={300}>
+                              {group.keepUrl}
+                            </Text>
+                          }
+                        >
+                          <Text size="xs" fw={600} c="dimmed" mb={4}>
+                            All URLs in group (
+                            {group.keepUrl === group.normalizedUrl
+                              ? 'strict match'
+                              : `normalized to: ${group.normalizedUrl}`}
+                            ):
+                          </Text>
+                          <Stack gap={2}>
+                            <Text size="xs" c="green" ff="monospace" style={{ wordBreak: 'break-all' }}>
+                              {'[KEEP]'}
+                              <Text
+                                component="a"
+                                href={group.keepUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                c="green"
+                                td="underline"
+                                size="xs"
+                                span
+                                ff="monospace"
+                              >
+                                {group.keepUrl}
+                              </Text>
+                            </Text>
+                            {group.duplicateUrls.map((url, j) => (
+                              <Text
+                                // biome-ignore lint/suspicious/noArrayIndexKey: duplicate URLs may repeat within a group; index keys are intentional
+                                key={j}
+                                size="xs"
+                                c="orange"
+                                ff="monospace"
+                                style={{ wordBreak: 'break-all' }}
+                              >
+                                {'[DUP] '}
+                                <Text
+                                  component="a"
+                                  href={url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  c="orange"
+                                  td="underline"
+                                  size="xs"
+                                  span
+                                  ff="monospace"
+                                >
+                                  {url}
+                                </Text>
+                              </Text>
+                            ))}
+                          </Stack>
+                        </ExpandableGroupCard>
                       ))}
                     </Stack>
                   </Box>

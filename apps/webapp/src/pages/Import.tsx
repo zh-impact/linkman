@@ -1,81 +1,44 @@
-import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  Code,
-  Container,
-  Divider,
-  FileInput,
-  Group,
-  SegmentedControl,
-  Stack,
-  Text,
-  Title,
-  UnstyledButton,
-} from '@mantine/core'
-import { useRef, useState } from 'react'
+import { Alert, Box, Button, Card, Container, SegmentedControl, Text, Title } from '@mantine/core'
+import { useState } from 'react'
 
+import { ContentPreviewCard, FileInputCard, useImportInput } from '../components/ImportContent'
 import { trpc } from '../utils/trpc-client'
 
 export function ImportPage() {
-  const [file, setFile] = useState<File | null>(null)
-  const [fileContent, setFileContent] = useState('')
   const [fileType, setFileType] = useState<'TXT' | 'JSON'>('TXT')
   const [isImporting, setIsImporting] = useState(false)
   const [result, setResult] = useState<{
     importedCount: number
     invalid: string[]
   } | null>(null)
-  const [error, setError] = useState('')
 
-  const resetRef = useRef<() => void>(null)
+  const {
+    file,
+    fileContent,
+    error: inputError,
+    resetRef,
+    handleFileSelect,
+    handlePasteFromClipboard,
+    reset,
+    setError: setInputError,
+  } = useImportInput()
 
-  const handleFileSelect = async (file: File | null) => {
-    if (!file) return
-    setFile(file)
-    setError('')
-    setResult(null)
-
-    const ext = file.name.split('.').pop()
-    if (ext === 'json') {
-      setFileType('JSON')
-    } else {
-      setFileType('TXT')
-    }
-    try {
-      const text = await file.text()
-      setFileContent(text)
-    } catch {
-      setError('Failed to read file')
-    }
+  const handleFileSelectWithAutoDetect = async (selected: File | null) => {
+    if (!selected) return
+    const ext = selected.name.split('.').pop()
+    if (ext === 'json') setFileType('JSON')
+    else setFileType('TXT')
+    handleFileSelect(selected)
   }
 
-  const handlePasteFromClipboard = async () => {
-    try {
-      const text = await navigator.clipboard.readText()
-      if (!text.trim()) {
-        setError('Clipboard is empty')
-        return
-      }
-      setError('')
-      setResult(null)
-      setFileContent(text)
-      const trimmed = text.trim()
-      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-        setFileType('JSON')
-      } else {
-        setFileType('TXT')
-      }
-    } catch {
-      setError('Failed to read from clipboard')
-    }
+  const handlePasteWithAutoDetect = async () => {
+    handlePasteFromClipboard()
   }
 
   const handleImport = async () => {
     if (!fileContent) return
     setIsImporting(true)
-    setError('')
+    setInputError('')
     setResult(null)
 
     try {
@@ -92,13 +55,12 @@ export function ImportPage() {
         console.error('[import] error name:', err.name)
         console.error('[import] error message:', err.message)
         console.error('[import] error stack:', err.stack)
-        // Try to extract tRPC details
         const anyErr = err as unknown as Record<string, unknown>
         if (anyErr.cause) console.error('[import] cause:', JSON.stringify(anyErr.cause, null, 2))
         if (anyErr.data) console.error('[import] data:', JSON.stringify(anyErr.data, null, 2))
         if (anyErr.shape) console.error('[import] shape:', JSON.stringify(anyErr.shape, null, 2))
       }
-      setError(err instanceof Error ? err.message : 'Import failed')
+      setInputError(err instanceof Error ? err.message : 'Import failed')
     } finally {
       setIsImporting(false)
     }
@@ -110,69 +72,26 @@ export function ImportPage() {
         <Title order={2}>Import Links</Title>
       </Box>
 
-      <Card withBorder>
-        <Text fw={500}>Select File or Paste</Text>
-        <Text size="sm" c="dimmed">
-          Upload .txt/.json file or paste content from clipboard
-        </Text>
-        <Stack mt="xs">
-          <FileInput
-            resetRef={resetRef}
-            accept=".txt,.json"
-            placeholder="Select file..."
-            value={file}
-            onChange={handleFileSelect}
-          />
-          <Divider label="OR" />
-          <Button onClick={handlePasteFromClipboard}>Paste from Clipboard</Button>
-        </Stack>
-      </Card>
+      <FileInputCard
+        resetRef={resetRef}
+        onFileSelect={handleFileSelectWithAutoDetect}
+        onPasteFromClipboard={handlePasteWithAutoDetect}
+      />
 
       <Card withBorder>
         <Text fw={500}>File Type</Text>
         <SegmentedControl value={fileType} onChange={(v) => setFileType(v)} data={['TXT', 'JSON']} />
       </Card>
 
-      {fileContent && (
-        <Card withBorder>
-          <Group justify="space-between" mb="xs">
-            <Text fw={500}>Content Preview</Text>
-            <UnstyledButton
-              onClick={() => {
-                setFile(null)
-                setFileContent('')
-                setError('')
-                setResult(null)
-                resetRef.current?.()
-              }}
-            >
-              Clear
-            </UnstyledButton>
-          </Group>
-
-          <Stack>
-            <Code block mah="12rem">
-              {fileContent.slice(0, 2000)}
-              {fileContent.length > 2000 && (
-                <Text c="dimmed" size="xs">
-                  ... ({fileContent.length - 2000} more characters)
-                </Text>
-              )}
-            </Code>
-            <Text c="dimmed" size="xs">
-              {fileContent.split('\n').filter(Boolean).length} lines, {fileContent.length} characters
-            </Text>
-          </Stack>
-        </Card>
-      )}
+      {fileContent && <ContentPreviewCard content={fileContent} onClear={reset} />}
 
       <Button loading={isImporting} disabled={!fileContent} onClick={handleImport}>
         Import
       </Button>
 
-      {error && (
+      {inputError && (
         <Alert color="red" title="Import Failed">
-          {error}
+          {inputError}
         </Alert>
       )}
 

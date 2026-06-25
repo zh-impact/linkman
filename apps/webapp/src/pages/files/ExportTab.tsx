@@ -13,6 +13,7 @@ import {
   Text,
 } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
+import { formatSize } from '../../utils/format'
 import { trpc } from '../../utils/trpc-client'
 
 interface FileInfo {
@@ -106,12 +107,6 @@ function buildDownloadFilename(sourceFilename: string): string {
   const safeStem = stem.replace(/[/\\]/g, '-')
   const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
   return `${safeStem}-${ts}.json`
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function ExportTab() {
@@ -210,8 +205,7 @@ export function ExportTab() {
       const visibleFilenames = (
         hideStandardJson ? files.filter((f) => formatMap.get(f.filename) !== 'json_array') : files
       ).map((f) => f.filename)
-      const allVisibleSelected =
-        visibleFilenames.length > 0 && visibleFilenames.every((fn) => prev.has(fn))
+      const allVisibleSelected = visibleFilenames.length > 0 && visibleFilenames.every((fn) => prev.has(fn))
       if (allVisibleSelected) {
         const next = new Set(prev)
         for (const fn of visibleFilenames) next.delete(fn)
@@ -385,8 +379,7 @@ export function ExportTab() {
           )}
           {classifyError && (
             <Alert color="yellow" variant="light">
-              Classification failed — list will show all files including standard JSON.{' '}
-              {classifyError}
+              Classification failed — list will show all files including standard JSON. {classifyError}
             </Alert>
           )}
           {previewError && (
@@ -419,9 +412,7 @@ export function ExportTab() {
                   // finishes) wins; preview's value is the same data but only
                   // available after the user clicks Preview.
                   const detectedFormat =
-                    previewRow?.kind === 'ok'
-                      ? previewRow.detectedFormat
-                      : formatMap.get(f.filename)
+                    previewRow?.kind === 'ok' ? previewRow.detectedFormat : formatMap.get(f.filename)
                   return (
                     <Box
                       key={f.filename}
@@ -555,12 +546,7 @@ export function ExportTab() {
                         <ScrollArea.Autosize mah={120} type="auto" offsetScrollbars>
                           <Stack gap={2}>
                             {p.sample.map((row) => (
-                              <Text
-                                key={`${row.url}|${row.title}`}
-                                size="xs"
-                                ff="monospace"
-                                truncate
-                              >
+                              <Text key={`${row.url}|${row.title}`} size="xs" ff="monospace" truncate>
                                 {row.url}
                                 {row.title ? ` — ${row.title}` : ''}
                               </Text>

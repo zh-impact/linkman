@@ -1,5 +1,6 @@
 import { Alert, Badge, Box, Button, Group, ScrollArea, Stack, Text } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
+import { formatSize } from '../../utils/format'
 import { trpc } from '../../utils/trpc-client'
 import type { useConfirm } from '../../utils/use-confirm'
 
@@ -13,12 +14,6 @@ interface FilesDryRunState {
   totalSizeBytes: number
   sample: FileSampleRow[]
   confirmToken: string
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function FilesPruneSection({
