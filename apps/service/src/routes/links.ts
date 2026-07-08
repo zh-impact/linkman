@@ -29,6 +29,12 @@ const statusEnum = z.enum([
   'error',
 ])
 
+// URL-component targets for advanced search. When omitted, behavior is
+// byte-identical to the legacy free-text search (unless prefixed terms like
+// `host:foo` appear in the search string — those activate targeting
+// automatically). See design D8.
+const searchPartsEnum = z.enum(['host', 'path', 'search', 'hash'])
+
 export const linksRouter = router({
   list: publicProcedure
     .input(
@@ -37,15 +43,27 @@ export const linksRouter = router({
         offset: z.number().min(0).default(0),
         status: statusEnum.optional(),
         search: z.string().optional(),
+        searchParts: z.array(searchPartsEnum).optional(),
       }),
     )
     .query(async ({ input }) => {
-      const { limit, offset, status, search } = input
+      const { limit, offset, status, search, searchParts } = input
 
       if (search) {
+        // Convert the UI selection into the targeting shape expected by the
+        // query layer. `undefined` (vs. all-false object) signals "no advanced
+        // UI active" — required to keep the legacy path byte-identical.
+        const targeting = searchParts
+          ? {
+              host: searchParts.includes('host'),
+              path: searchParts.includes('path'),
+              search: searchParts.includes('search'),
+              hash: searchParts.includes('hash'),
+            }
+          : undefined
         const [links, countResult] = await Promise.all([
-          searchLinksPaginated(search, status ?? null, limit, offset),
-          searchLinksCount(search, status ?? null),
+          searchLinksPaginated(search, status ?? null, limit, offset, targeting),
+          searchLinksCount(search, status ?? null, targeting),
         ])
         return { links, total: countResult?.count ?? 0 }
       }
@@ -58,10 +76,7 @@ export const linksRouter = router({
         return { links, total: countResult?.count ?? 0 }
       }
 
-      const [links, countResult] = await Promise.all([
-        getLinksPaginated(limit, offset),
-        getLinksCount(),
-      ])
+      const [links, countResult] = await Promise.all([getLinksPaginated(limit, offset), getLinksCount()])
       return { links, total: countResult?.count ?? 0 }
     }),
 

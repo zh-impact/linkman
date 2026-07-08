@@ -9,6 +9,9 @@ export const linksTable = sqliteTable(
     originalUrl: text('original_url').notNull(),
     normalizedUrl: text('normalized_url').notNull(),
     domain: text('domain').notNull(),
+    urlPath: text('url_path'),
+    urlQuery: text('url_query'),
+    urlHash: text('url_hash'),
     title: text('title'),
     source: text('source', { enum: ['TXT', 'JSON'] }).notNull(),
     sourceOrder: integer('source_order').notNull(),
@@ -42,6 +45,14 @@ export const linksTable = sqliteTable(
     index('idx_links_similarity_group').on(table.similarityGroup),
     index('idx_links_duplicate_of').on(table.duplicateOf),
     index('idx_links_created_at').on(table.createdAt),
+    // Pattern-mirror indexes for URL-component search (host/path/search/hash).
+    // NOTE: substring search (LIKE '%q%') cannot use these — leading-wildcard
+    // forces a full scan. They exist for future exact-prefix / equality lookups
+    // and to mirror the existing idx_links_domain pattern. Not a performance
+    // optimization for the substring case. See design.md R5.
+    index('idx_links_url_path').on(table.urlPath),
+    index('idx_links_url_query').on(table.urlQuery),
+    index('idx_links_url_hash').on(table.urlHash),
   ],
 )
 

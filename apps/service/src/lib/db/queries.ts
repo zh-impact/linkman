@@ -1,4 +1,5 @@
-import { and, desc, eq, inArray, isNotNull, like, or, sql } from 'drizzle-orm'
+import { and, type Column, desc, eq, inArray, isNotNull, like, or, type SQL, sql } from 'drizzle-orm'
+import { PREFIXES, type Prefix, parseSearchQuery } from '../url/parse-search-query'
 import { db } from './client'
 import { importJobs, linksTable, operations, snapshots, testJobs, testResults } from './schema'
 
@@ -31,10 +32,7 @@ export async function deleteLinksByIds(ids: string[]) {
   }
 }
 
-export async function updateLinksStatusByIds(
-  ids: string[],
-  data: Partial<typeof linksTable.$inferInsert>,
-) {
+export async function updateLinksStatusByIds(ids: string[], data: Partial<typeof linksTable.$inferInsert>) {
   if (ids.length === 0) return
   const BATCH = 500
   for (let i = 0; i < ids.length; i += BATCH) {
@@ -71,9 +69,7 @@ export async function getActiveLinksForAnalysis(): Promise<AnalysisLink[]> {
       domain: linksTable.domain,
     })
     .from(linksTable)
-    .where(
-      sql`${linksTable.status} NOT IN ('duplicate_removed', 'filtered_internal', 'filtered_similar')`,
-    )
+    .where(sql`${linksTable.status} NOT IN ('duplicate_removed', 'filtered_internal', 'filtered_similar')`)
     .all()
 }
 
@@ -96,13 +92,7 @@ export async function getLinksByIds(ids: string[]) {
 }
 
 export async function getLinksPaginated(limit: number, offset: number) {
-  return db
-    .select()
-    .from(linksTable)
-    .orderBy(desc(linksTable.createdAt))
-    .limit(limit)
-    .offset(offset)
-    .all()
+  return db.select().from(linksTable).orderBy(desc(linksTable.createdAt)).limit(limit).offset(offset).all()
 }
 
 export async function getLinksByStatusPaginated(status: string, limit: number, offset: number) {
@@ -164,32 +154,182 @@ export async function getAllLinkIds() {
   return results.map((r) => r.id)
 }
 
-// Search links with pagination (optionally filtered by status first)
-export async function searchLinksPaginated(
-  query: string,
-  status: string | null,
-  limit: number,
-  offset: number,
-) {
+/**
+ * UI-selected URL components for advanced search targeting. When all flags
+ * are false (or undefined), bare terms match all four components (D4 default).
+ * `undefined` (vs. an all-false object) signals "no advanced UI active" — used
+ * to short-circuit to the legacy free-text path when no prefixed terms are
+ * present either.
+ */
+export interface SearchTargeting {
+  host?: boolean
+  path?: boolean
+  search?: boolean
+  hash?: boolean
+}
+
+/** True iff the parsed query contains at least one recognized prefixed term. */
+function hasPrefixed(parsed: ReturnType<typeof parseSearchQuery>): boolean {
+  return PREFIXES.some((p) => parsed.prefixed[p]?.length)
+}
+
+/**
+ * True iff the targeting selection is "default-like" — i.e., the user has not
+ * meaningfully narrowed. Covers three cases:
+ *  - `undefined`: caller omitted searchParts entirely (Advanced off).
+ *  - All four `true`: caller passed searchParts=['host','path','search','hash']
+ *    (Advanced on with default selection — user hasn't unchecked anything).
+ *  - All four `false`: caller passed searchParts=[] (Advanced on with
+ *    everything unchecked — per spec scenario "Empty selection is treated as
+ *    all-components" this is equivalent to the default).
+ *
+ * In all three cases we use legacy free-text search (URL + title + tags) so
+ * behavior is byte-identical to pre-change. As soon as the user narrows
+ * (unchecks some but not all) OR uses power-user syntax (prefixed terms),
+ * we switch to advanced mode (URL parts only, per design D2).
+ */
+function isDefaultLikeTargeting(targeting: SearchTargeting | undefined): boolean {
+  if (targeting === undefined) return true
+  const allTrue =
+    targeting.host === true && targeting.path === true && targeting.search === true && targeting.hash === true
+  const allFalse =
+    targeting.host === false &&
+    targeting.path === false &&
+    targeting.search === false &&
+    targeting.hash === false
+  return allTrue || allFalse
+}
+
+/**
+ * Build the WHERE conditions for advanced URL-component search.
+ *
+ * Returns null when the request is in "legacy mode" (no targeting and no
+ * prefixed terms in the query string) — callers should then fall back to the
+ * original flat LIKE over `originalUrl | normalizedUrl | domain | title | tags`.
+ */
+function buildAdvancedConditions(
+  parsed: ReturnType<typeof parseSearchQuery>,
+  targeting: SearchTargeting | undefined,
+): SQL | undefined {
+  // Map a prefix to its LIKE column. `host` uses `domain` (the existing column
+  // already populated for every row at write time). The other three map to the
+  // new dedicated columns.
+  const partColumn: Record<Prefix, Column> = {
+    host: linksTable.domain,
+    path: linksTable.urlPath,
+    search: linksTable.urlQuery,
+    hash: linksTable.urlHash,
+  }
+
+  // Default bare-term targeting is all four parts (D4). When targeting is
+  // provided (caller passed searchParts), filter to the true-selected ones;
+  // empty selection falls back to all four.
+  const selectedParts: Prefix[] =
+    targeting !== undefined ? PREFIXES.filter((p) => targeting?.[p] === true) : [...PREFIXES]
+  const effectiveParts: Prefix[] = selectedParts.length > 0 ? selectedParts : [...PREFIXES]
+
+  const clauses: SQL[] = []
+
+  // Helper: invalid-URL fallback for a single search value (D5). Malformed
+  // URLs (where `new URL(originalUrl)` throws) have url_path/url_query/
+  // url_hash all NULL — those rows must still match if originalUrl contains
+  // the value as a substring, regardless of which components the user
+  // targeted. Always applied per term (no condition skips it). Uses `sql\`...\``
+  // directly so the result is `SQL` (not `SQL | undefined` from `and()`),
+  // avoiding any narrowing dance at the push sites.
+  const invalidUrlFallback = (value: string): SQL =>
+    sql`${linksTable.urlPath} IS NULL AND ${like(linksTable.originalUrl, `%${value}%`)}`
+
+  // Prefixed terms: same-prefix OR, cross-prefix AND. Implementation:
+  //   AND across different prefixes — outer AND of per-prefix OR-groups.
+  //   OR within same prefix — each value contributes one LIKE.
+  // Also OR in the invalid-URL fallback for each prefixed value (so malformed
+  // rows are searchable by host:text etc. too).
+  for (const prefix of PREFIXES) {
+    const values = parsed.prefixed[prefix]
+    if (!values || values.length === 0) continue
+    const groupClauses: SQL[] = values.map((v) => like(partColumn[prefix], `%${v}%`) as SQL)
+    for (const v of values) groupClauses.push(invalidUrlFallback(v))
+    const joined = groupClauses.length === 1 ? groupClauses[0] : or(...groupClauses)
+    if (joined) clauses.push(joined)
+  }
+
+  // Bare terms: each term produces one OR-group (OR across selected parts plus
+  // invalid-URL fallback). The outer `and(...clauses)` then ANDs these groups
+  // together — so `foo bar` matches rows where (some part contains 'foo') AND
+  // (some part contains 'bar'). This differs from legacy free-text search,
+  // which treats `foo bar` as one literal substring. The split is intentional:
+  // advanced mode is opt-in, and AND-ing bare terms is the more useful
+  // interpretation for multi-word queries.
+  for (const term of parsed.bare) {
+    const bareClauses: SQL[] = effectiveParts.map((p) => like(partColumn[p], `%${term}%`) as SQL)
+    bareClauses.push(invalidUrlFallback(term))
+    const joined = bareClauses.length === 1 ? bareClauses[0] : or(...bareClauses)
+    if (joined) clauses.push(joined)
+  }
+
+  if (clauses.length === 0) return undefined
+  if (clauses.length === 1) return clauses[0]
+  return and(...clauses)
+}
+
+/** Legacy free-text LIKE across originalUrl/normalizedUrl/domain/title/tags. */
+function buildLegacyConditions(query: string): SQL {
   const searchTerm = `%${query}%`
-  const conditions = or(
+  const legacy = or(
     like(linksTable.originalUrl, searchTerm),
     like(linksTable.normalizedUrl, searchTerm),
     like(linksTable.domain, searchTerm),
     like(linksTable.title, searchTerm),
     like(linksTable.tags, searchTerm),
   )
+  // legacy is `SQL | undefined` per drizzle types, but with 5 args it's always defined.
+  return legacy ?? sql`1=1`
+}
+
+/**
+ * Resolve the final WHERE clause for a search. Returns undefined when there is
+ * nothing to apply (caller treats as "no filter").
+ *
+ * Modes:
+ *  - Legacy (byte-identical to pre-change): no prefixed terms in the query
+ *    AND targeting is "default-like" (undefined, all-true, or all-false).
+ *    Matches `originalUrl | normalizedUrl | domain | title | tags`.
+ *  - Advanced (URL parts only, per design D2): when the user has narrowed
+ *    (mixed true/false targeting) OR used power-user syntax (prefixed terms).
+ *    Matches `domain | urlPath | urlQuery | urlHash` + invalid-URL fallback.
+ *
+ * Rationale: the user's mental model is "Advanced is a switch for narrowing".
+ * If they haven't narrowed (default selection OR degenerate empty selection),
+ * behavior must match pre-change exactly — including title/tags matches.
+ * Narrowing or power-user syntax opts into URL-only mode.
+ */
+function resolveSearchConditions(query: string, targeting: SearchTargeting | undefined): SQL | undefined {
+  const parsed = parseSearchQuery(query)
+  const hasAnyPrefixed = hasPrefixed(parsed)
+
+  if (!hasAnyPrefixed && isDefaultLikeTargeting(targeting)) {
+    return buildLegacyConditions(query)
+  }
+
+  return buildAdvancedConditions(parsed, targeting)
+}
+
+// Search links with pagination (optionally filtered by status first)
+export async function searchLinksPaginated(
+  query: string,
+  status: string | null,
+  limit: number,
+  offset: number,
+  targeting?: SearchTargeting,
+) {
+  const conditions = resolveSearchConditions(query, targeting)
 
   if (status) {
     return db
       .select()
       .from(linksTable)
-      .where(
-        and(
-          eq(linksTable.status, status as (typeof linksTable.status.enumValues)[number]),
-          conditions,
-        ),
-      )
+      .where(and(eq(linksTable.status, status as (typeof linksTable.status.enumValues)[number]), conditions))
       .orderBy(desc(linksTable.createdAt))
       .limit(limit)
       .offset(offset)
@@ -199,37 +339,29 @@ export async function searchLinksPaginated(
   return db
     .select()
     .from(linksTable)
-    .where(conditions)
+    .where(conditions ?? sql`1=1`)
     .orderBy(desc(linksTable.createdAt))
     .limit(limit)
     .offset(offset)
     .all()
 }
 
-export async function searchLinksCount(query: string, status: string | null) {
-  const searchTerm = `%${query}%`
-  const conditions = or(
-    like(linksTable.originalUrl, searchTerm),
-    like(linksTable.normalizedUrl, searchTerm),
-    like(linksTable.domain, searchTerm),
-    like(linksTable.title, searchTerm),
-    like(linksTable.tags, searchTerm),
-  )
+export async function searchLinksCount(query: string, status: string | null, targeting?: SearchTargeting) {
+  const conditions = resolveSearchConditions(query, targeting)
 
   if (status) {
     return db
       .select({ count: sql<number>`count(*)` })
       .from(linksTable)
-      .where(
-        and(
-          eq(linksTable.status, status as (typeof linksTable.status.enumValues)[number]),
-          conditions,
-        ),
-      )
+      .where(and(eq(linksTable.status, status as (typeof linksTable.status.enumValues)[number]), conditions))
       .get()
   }
 
-  return db.select({ count: sql<number>`count(*)` }).from(linksTable).where(conditions).get()
+  return db
+    .select({ count: sql<number>`count(*)` })
+    .from(linksTable)
+    .where(conditions ?? sql`1=1`)
+    .get()
 }
 
 // TestResult queries
@@ -304,10 +436,7 @@ export async function sampleImportJobs(limit = 10) {
  */
 export async function deleteImportJobsByFilenames(filenames: string[]) {
   if (filenames.length === 0) return 0
-  const result = await db
-    .delete(importJobs)
-    .where(inArray(importJobs.sourceContent, filenames))
-    .run()
+  const result = await db.delete(importJobs).where(inArray(importJobs.sourceContent, filenames)).run()
   return result.rowsAffected
 }
 
@@ -330,13 +459,7 @@ export async function insertOperation(data: typeof operations.$inferInsert) {
 }
 
 export async function getOperations(limit = 50, offset = 0) {
-  return db
-    .select()
-    .from(operations)
-    .orderBy(desc(operations.timestamp))
-    .limit(limit)
-    .offset(offset)
-    .all()
+  return db.select().from(operations).orderBy(desc(operations.timestamp)).limit(limit).offset(offset).all()
 }
 
 export async function getOperationById(id: string) {

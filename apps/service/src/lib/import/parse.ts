@@ -63,13 +63,35 @@ export function prepareUrlRecord(
         ? normalizeUrl(originalUrl, DEFAULT_NORMALIZE_CONFIG)
         : normalizeUrl(originalUrl, SMART_NORMALIZE_CONFIG)
 
+  // Extract URL components from `originalUrl` (NOT `normalizedUrl`).
+  // Rationale: the default normalization pipeline strips fragment
+  // (`removeFragment`), `www.` host prefix (`removeWww`), and trailing
+  // slashes (`removeTrailingSlash`). Extracting from `normalizedUrl` would
+  // silently break `hash:` search and `host:www.example.com` queries. See
+  // design.md D2 for full rationale. `extractDomain` already follows this
+  // pattern at normalize.ts:46 — we share one `new URL()` call here.
   const domain = extractDomain(originalUrl)
+  let urlPath: string | undefined
+  let urlQuery: string | undefined
+  let urlHash: string | undefined
+  try {
+    const parsed = new URL(originalUrl)
+    urlPath = parsed.pathname || undefined
+    urlQuery = parsed.search ? parsed.search.slice(1) : undefined
+    urlHash = parsed.hash ? parsed.hash.slice(1) : undefined
+  } catch {
+    // Malformed URL — leave component columns undefined (Drizzle stores NULL).
+    // Row will be matched by the invalid-URL full-text fallback (design D5).
+  }
 
   return {
     id: uuidv4(),
     originalUrl,
     normalizedUrl,
     domain,
+    urlPath,
+    urlQuery,
+    urlHash,
     title: link.title ?? '',
     source: sourceType,
     sourceOrder: order,

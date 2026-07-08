@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Code,
   Container,
   Divider,
   Group,
@@ -13,13 +14,15 @@ import {
   Pagination,
   Select,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
   Title,
 } from '@mantine/core'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { LINK_STATUS_CONFIG, LINK_STATUS_OPTIONS } from '../components/status-config'
+import { PREFIXES, type Prefix, parseSearchQuery, stringifySearchQuery } from '../utils/parse-search-query'
 import { trpc } from '../utils/trpc-client'
 import { useConfirm } from '../utils/use-confirm'
 
@@ -225,6 +228,11 @@ function GroupItem({
 
 // --- Main page ---
 
+// localStorage key for the Advanced toggle. Module-scoped so the same
+// string identity is used for the lifetime of the bundle (avoids any
+// chance of the key drifting between reads/writes).
+const ADVANCED_KEY = 'linkman:links:advanced-search'
+
 export function LinksPage() {
   const [links, setLinks] = useState<LinkItem[]>([])
   const [total, setTotal] = useState(0)
@@ -233,6 +241,26 @@ export function LinksPage() {
   const [status, setStatus] = useState<string | undefined>(undefined)
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
+
+  // Advanced search state. Toggle persisted to localStorage; selection lives
+  // in the search-box text (via the parser) but is mirrored into a separate
+  // piece of state for the Checkbox.Group.
+  const [advanced, setAdvanced] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem(ADVANCED_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const [selectedParts, setSelectedParts] = useState<Prefix[]>([...PREFIXES])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(ADVANCED_KEY, advanced ? '1' : '0')
+    } catch {
+      // Ignore quota / privacy-mode errors — persistence is best-effort.
+    }
+  }, [advanced])
 
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>('table')
@@ -259,6 +287,9 @@ export function LinksPage() {
         offset: (page - 1) * PAGE_SIZE,
         status: status || undefined,
         search: search || undefined,
+        // Pass selection only when Advanced is on. When off, server falls
+        // back to legacy free-text search (byte-identical to pre-change).
+        searchParts: advanced ? selectedParts : undefined,
       })
       setLinks(
         (result.links as LinkItem[]).map((link) => {
@@ -273,7 +304,7 @@ export function LinksPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, status, search])
+  }, [page, status, search, advanced, selectedParts])
 
   useEffect(() => {
     fetchLinks()
@@ -283,10 +314,71 @@ export function LinksPage() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: deps are intentional triggers, not values used in the effect
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, status, search])
+  }, [page, status, search, advanced, selectedParts])
 
   const handleSearch = () => {
     setSearch(searchInput)
+    setPage(1)
+  }
+
+  // Derive the parsed query (prefixed + bare) from the live search-box text.
+  // Used to drive the checkbox state for two-way binding (D7).
+  const parsed = useMemo(() => parseSearchQuery(searchInput), [searchInput])
+
+  /**
+   * Effective checkbox selection: union of `selectedParts` (user-toggled)
+   * and any prefixes that appear in the search-box text (so typing
+   * `host:foo` adds `host` to the checked set even if `selectedParts`
+   * hasn't been updated yet). This is the displayed checkbox state.
+   */
+  const effectiveParts: Prefix[] = useMemo(() => {
+    const set = new Set<Prefix>(selectedParts)
+    for (const p of PREFIXES) {
+      if (parsed.prefixed[p]?.length) set.add(p)
+    }
+    return PREFIXES.filter((p) => set.has(p))
+  }, [selectedParts, parsed])
+
+  /**
+   * Toggle a part on/off from the Checkbox.Group. Per design D7:
+   *  - Toggling on: add to `selectedParts`. The search-box text is left
+   *    alone (if there's a bare term, it now also matches this part).
+   *  - Toggling off: remove from `selectedParts` AND strip any `part:...`
+   *    tokens from the search-box text.
+   *
+   * Toggling is an explicit "apply targeting" gesture (not a typing keystroke),
+   * so it commits both `searchInput` (live text) AND `search` (the value the
+   * next fetch reads). Without committing `search`, an uncheck that strips a
+   * prefix from the visible text would leave the server still applying that
+   * prefix from the prior committed value — UI text and result set diverge.
+   * Committing on toggle also fixes the "no-op before first Enter" case: if
+   * the user typed text but hasn't pressed Search, toggling now commits it.
+   */
+  const handlePartToggle = (next: Prefix[]) => {
+    const nextSet = new Set(next)
+    const removed = effectiveParts.filter((p) => !nextSet.has(p))
+
+    // Strip prefixed tokens for any part that was unchecked.
+    let nextInput = searchInput
+    if (removed.length > 0) {
+      const stripped: typeof parsed = {
+        prefixed: {},
+        bare: parsed.bare,
+      }
+      for (const p of PREFIXES) {
+        if (!removed.includes(p) && parsed.prefixed[p]) {
+          stripped.prefixed[p] = parsed.prefixed[p]
+        }
+      }
+      nextInput = stringifySearchQuery(stripped).trim()
+      setSearchInput(nextInput)
+    }
+
+    setSelectedParts(next)
+    // Commit the (possibly rewritten) search so fetchLinks uses the new
+    // state on the next tick. If `nextInput` is empty, search becomes '' and
+    // the server falls back to listing mode (no search filter).
+    setSearch(nextInput)
     setPage(1)
   }
 
@@ -483,13 +575,19 @@ export function LinksPage() {
 
       <Group mb="md">
         <TextInput
-          placeholder="Search URLs, domains, titles..."
+          placeholder="Search URLs, domains, titles... (advanced: host:foo path:bar)"
           value={searchInput}
           onChange={(e) => setSearchInput(e.currentTarget.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
           style={{ flex: 1 }}
         />
         <Button onClick={handleSearch}>Search</Button>
+        <Switch
+          checked={advanced}
+          onChange={(e) => setAdvanced(e.currentTarget.checked)}
+          label="Advanced"
+          aria-label="Toggle advanced URL-component search"
+        />
         <Select
           placeholder="Filter by status"
           data={LINK_STATUS_OPTIONS}
@@ -502,6 +600,25 @@ export function LinksPage() {
           w={200}
         />
       </Group>
+
+      {advanced && (
+        <Group mb="md" gap="md" align="center">
+          <Text size="sm" c="dimmed">
+            Match in:
+          </Text>
+          <Checkbox.Group value={effectiveParts} onChange={(v) => handlePartToggle(v as Prefix[])}>
+            <Group gap="md" mt={4}>
+              {PREFIXES.map((part) => (
+                <Checkbox key={part} value={part} label={part} />
+              ))}
+            </Group>
+          </Checkbox.Group>
+          <Text size="xs" c="dimmed">
+            Multi-select = OR (match in any). Default selection = same as Advanced-off (includes title/tags).
+            Uncheck a part to narrow. Tip: type <Code>host:github.com</Code> to target inline.
+          </Text>
+        </Group>
+      )}
 
       {/* Bulk actions bar */}
       {links.length > 0 && (

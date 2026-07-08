@@ -35,6 +35,42 @@ LinkMan 是一个面向「重度链接收藏者」的本地优先（local-first�
 - 按状态、关键词搜索；多选批量打标签、批量删除、批量导出（CSV/JSON）
 - 单条编辑、状态流转可视化
 
+#### 高级搜索语法
+
+搜索框支持两种交互：**普通模式**（默认）对 `originalUrl | normalizedUrl | domain | title | tags` 做模糊匹配；**高级模式**把关键词限定在 URL 的某个部分。开启搜索框右侧的 `Advanced` 开关即可切换。
+
+URL 拆分为四个部分（以 `https://www.example.com/foo/bar?q=1#section` 为例）：
+
+| 部分 | 值           | 含义             |
+| ------ | ------------ | ---------------- |
+| host   | `www.example.com` | 主机名           |
+| path   | `/foo/bar`   | 路径             |
+| search | `q=1`        | 查询字符串（不含 `?`） |
+| hash   | `section`    | 锚点（不含 `#`） |
+
+**Google 风格前缀语法**（无需 UI，直接输入）：
+
+```
+host:github.com            匹配主机名
+host:github.com path:pull  AND：host 和 path 同时满足
+host:github.com host:gitlab.com  OR：同一前缀多个值匹配任一
+foo:bar                    未识别前缀 → 整体作为普通搜索词
+host:                      前缀后无值 → 视为普通文本，不触发前缀匹配
+host:github.com pull       前缀 + 裸词组合：host 满足且裸词在选中部分匹配
+```
+
+**UI 复选框（OR 语义）**：Advanced 开关打开后下方出现四个复选框，多选 = 任一命中。复选框与前缀语法**双向绑定**——输入 `host:foo` 自动勾选 `host`；取消勾选会从搜索框移除对应前缀。
+
+**默认与窄化规则**（关键）：
+
+- Advanced 关闭 → 完全等同于改造前的搜索行为
+- Advanced 打开 + 四项全选 → 与关闭字节一致（含 title/tags 命中）
+- Advanced 打开 + 全部不勾 → 视为默认，与关闭字节一致
+- Advanced 打开 + 取消至少一项（但非全部）→ 进入窄化模式，仅在选中部分搜索（不再匹配 title/tags）
+- 任意前缀语法出现 → 强制进入窄化模式（即便 Advanced 关闭）
+
+**无效 URL 回退**：无法被 `new URL()` 解析的链接（剪贴板脏数据、损坏的书签）会跳过部分匹配，直接对 `originalUrl` 做全文 LIKE，不会从结果中消失。
+
 ### 操作历史与一键回滚
 
 - 每一次导入、去重、过滤、批量编辑、删除都会写入 `operations` 表
