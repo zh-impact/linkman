@@ -35,7 +35,7 @@
     "ignoreUnknown": true,
     "includes": [
       "**",
-      "!!**/mode_modules",
+      "!!**/node_modules",
       "!!**/.git",
       "!!**/dist",
       "!!**/build",
