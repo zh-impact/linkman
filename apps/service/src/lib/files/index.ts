@@ -79,6 +79,18 @@ export async function readFile(relativePath: string): Promise<string> {
   return fs.promises.readFile(absPath, 'utf-8')
 }
 
+/**
+ * Return the file's modification time as an ISO 8601 string. Used by
+ * `parse.start` to capture `import_jobs.fileMtime` so the UI can compute
+ * staleness (`file.modifiedAt !== job.fileMtime`) without a server stat()
+ * round-trip on every Sources tab load.
+ */
+export async function getMtime(relativePath: string): Promise<string> {
+  const absPath = resolveFilePath(relativePath)
+  const stat = await fs.promises.stat(absPath)
+  return stat.mtime.toISOString()
+}
+
 export async function readFileLines(
   relativePath: string,
   startLine: number,

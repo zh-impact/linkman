@@ -43,6 +43,10 @@ interface ImportJobInfo {
   status: JobStatus
   importedCount: number
   errorCount: number
+  // ISO 8601 file mtime captured at parse.start. Compared against the
+  // file list's `modifiedAt` to compute staleness client-side without a
+  // server stat() round-trip. NULL until first parse runs.
+  fileMtime: string | null
   createdAt: string
 }
 
@@ -66,13 +70,30 @@ const statusMeta: Record<JobStatus, { color: string; label: string }> = {
 }
 
 export function FilesPage() {
+  // Lifted tab state so FilesPage can observe re-entry into 'resolved' and
+  // bump a refresh key. Mantine v9 renamed `onTabChange` → `onChange`; the
+  // old name silently no-ops, which broke tab switching. useEffect on the
+  // active value only fires on actual change — sufficient for "user came
+  // back to it".
+  const [activeTab, setActiveTab] = useState('sources')
+  // Resolved list is stale whenever: (a) user re-enters the Resolved tab,
+  // or (b) a parse completes that may have inserted new rows. Both paths
+  // bump this key; ResolvedTab's useEffect([refreshKey]) refetches.
+  const [resolvedRefreshKey, setResolvedRefreshKey] = useState(0)
+  const bumpResolved = useCallback(() => setResolvedRefreshKey((k) => k + 1), [])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: bumpResolved is stable
+  useEffect(() => {
+    if (activeTab === 'resolved') bumpResolved()
+  }, [activeTab])
+
   return (
     <Container strategy="grid" size="lg">
       <Title order={2} mb="md">
         Files
       </Title>
 
-      <Tabs defaultValue="sources">
+      <Tabs value={activeTab} onChange={(v) => v && setActiveTab(v)}>
         <Tabs.List mb="md">
           <Tabs.Tab value="sources">Sources</Tabs.Tab>
           <Tabs.Tab value="resolved">Resolved</Tabs.Tab>
@@ -80,11 +101,11 @@ export function FilesPage() {
         </Tabs.List>
 
         <Tabs.Panel value="sources">
-          <SourcesTab />
+          <SourcesTab onParseComplete={bumpResolved} />
         </Tabs.Panel>
 
         <Tabs.Panel value="resolved">
-          <ResolvedTab />
+          <ResolvedTab refreshKey={resolvedRefreshKey} />
         </Tabs.Panel>
 
         <Tabs.Panel value="export">
@@ -95,7 +116,7 @@ export function FilesPage() {
   )
 }
 
-function SourcesTab() {
+function SourcesTab({ onParseComplete }: { onParseComplete: () => void }) {
   const [files, setFiles] = useState<FileInfo[]>([])
   const [jobMap, setJobMap] = useState<Map<string, ImportJobInfo>>(new Map())
   const [selected, setSelected] = useState<string | null>(null)
@@ -137,6 +158,20 @@ function SourcesTab() {
   }, [fetchAll])
 
   const selectedJob = selected ? (jobMap.get(selected) ?? null) : null
+  // Stale = file mtime changed since the job's stored fileMtime. Derived from
+  // already-fetched `files` + `jobMap` so it stays in sync on every refetch
+  // (parse completion, manual refresh, etc.). Only meaningful for completed
+  // jobs — pending/processing jobs always show their existing button label.
+  //
+  // No `fileMtime !== null` guard: a legacy completed job (fileMtime NULL
+  // from pre-deploy) is stale by definition — any ISO string !== null.
+  // Spec: link-parse "Re-parse a completed job whose file has changed".
+  const selectedFile = selected ? (files.find((f) => f.filename === selected) ?? null) : null
+  const selectedStale =
+    selectedJob !== null &&
+    selectedJob.status === 'completed' &&
+    selectedFile !== null &&
+    selectedFile.modifiedAt !== selectedJob.fileMtime
 
   // Sync type/strategy defaults when selection changes.
   // selectedJob is derived from selected + jobMap; depending only on `selected`
@@ -235,9 +270,13 @@ function SourcesTab() {
           return prev
         })
         fetchAll()
+        // Notify parent so the Resolved tab knows to refetch on next visit
+        // (or right now if it's mounted). Both first-parse and re-parse can
+        // have added rows to the links table; a no-op refresh is cheap.
+        onParseComplete()
       }
     },
-    [parseType, parseStrategy, fetchAll],
+    [parseType, parseStrategy, fetchAll, onParseComplete],
   )
 
   return (
@@ -340,6 +379,7 @@ function SourcesTab() {
               <Stack gap={0}>
                 <ParseToolbar
                   job={selectedJob}
+                  stale={selectedStale}
                   progress={selectedJob ? (progressByJob[selectedJob.jobId] ?? null) : null}
                   foreground={foregroundJob === (selectedJob?.jobId ?? '')}
                   backgroundRunning={selectedJob ? backgroundJobs.has(selectedJob.jobId) : false}
@@ -411,6 +451,7 @@ function setWithout(prev: Set<string>, id: string): Set<string> {
 
 function ParseToolbar({
   job,
+  stale,
   progress,
   foreground,
   backgroundRunning,
@@ -426,6 +467,7 @@ function ParseToolbar({
   onStop,
 }: {
   job: ImportJobInfo | null
+  stale: boolean
   progress: ParseProgress | null
   foreground: boolean
   backgroundRunning: boolean
@@ -443,21 +485,29 @@ function ParseToolbar({
   const isRunning = foreground || backgroundRunning
   const status = job?.status
   const isCompleted = status === 'completed'
+  // A completed-and-stale job offers Re-parse: the file changed since the
+  // stored fileMtime, so the user has new URLs to pick up. Per design D3/D6,
+  // re-parse must reuse the original type/strategy, so the selectors stay
+  // disabled even when stale-completed (no override allowed).
+  const isStaleCompleted = isCompleted && stale
   const isProcessing = status === 'processing'
   const blocked = anyForeground && !foreground
 
-  const buttonLabel = isCompleted
-    ? 'Parsed ✓'
-    : foreground
-      ? 'Parsing…'
-      : backgroundRunning
-        ? 'Stop'
-        : isProcessing && job && job.importedCount > 0
-          ? 'Resume'
-          : 'Parse'
+  const buttonLabel = isStaleCompleted
+    ? 'Re-parse'
+    : isCompleted
+      ? 'Parsed ✓'
+      : foreground
+        ? 'Parsing…'
+        : backgroundRunning
+          ? 'Stop'
+          : isProcessing && job && job.importedCount > 0
+            ? 'Resume'
+            : 'Parse'
 
   const buttonAction = isRunning ? onStop : onParse
-  const buttonColor = backgroundRunning ? 'red' : isCompleted ? 'green' : 'blue'
+  // Stale-completed is actionable (blue); clean-completed is done (green).
+  const buttonColor = backgroundRunning ? 'red' : isStaleCompleted ? 'blue' : isCompleted ? 'green' : 'blue'
 
   return (
     <Box px="md" py="sm">
@@ -473,6 +523,10 @@ function ParseToolbar({
           <Group gap="xs" wrap="nowrap">
             <SegmentedControl
               size="xs"
+              // Selectors disabled whenever the user can't override the parse:
+              // running, blocked by another foreground parse, completed.
+              // Stale-completed is still "completed" for the selectors —
+              // re-parse must reuse the original type/strategy.
               disabled={isCompleted || isRunning || blocked}
               value={parseType}
               onChange={(v) => onTypeChange(v as JobType)}
@@ -501,7 +555,9 @@ function ParseToolbar({
               size="xs"
               color={buttonColor}
               loading={foreground}
-              disabled={isCompleted || blocked}
+              // Only stale-completed unlocks the button; clean-completed
+              // stays disabled ("Parsed ✓" terminal state).
+              disabled={(isCompleted && !stale) || blocked}
               onClick={buttonAction}
             >
               {buttonLabel}
@@ -656,13 +712,12 @@ function ImportModal({ opened, onClose }: { opened: boolean; onClose: () => void
 
 const PAGE_SIZE = 500
 
-function ResolvedTab() {
+function ResolvedTab({ refreshKey }: { refreshKey: number }) {
   const [urls, setUrls] = useState<string[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState('')
-  const fetched = useRef(false)
 
   const fetchPage = useCallback(async (offset: number) => {
     try {
@@ -683,14 +738,26 @@ function ResolvedTab() {
     }
   }, [])
 
+  // Refetch page 0 whenever the refresh key changes. Two trigger paths
+  // bump it (see FilesPage): user re-enters the Resolved tab, or a parse
+  // completes. Replacing the prior useRef one-shot guard — that pattern
+  // never refetched, so the Resolved list stayed stale after re-parse.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a prop (new value per render), not an outer-scope value — biome's static analyzer misclassifies it
   useEffect(() => {
-    if (fetched.current) return
-    fetched.current = true
+    let cancelled = false
+    setUrls([])
+    setTotal(0)
+    setError('')
+    setLoading(true)
     ;(async () => {
       await fetchPage(0)
+      if (cancelled) return
       setLoading(false)
     })()
-  }, [fetchPage])
+    return () => {
+      cancelled = true
+    }
+  }, [refreshKey, fetchPage])
 
   const loadMore = useCallback(async () => {
     if (loadingMore || urls.length >= total) return

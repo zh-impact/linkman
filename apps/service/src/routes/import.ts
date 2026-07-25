@@ -2,19 +2,22 @@ import { TRPCError } from '@trpc/server'
 import { v4 as uuidv4 } from 'uuid'
 import { z } from 'zod'
 import {
+  countLinksForSourceFile,
   getImportJobByFilename,
   getImportJobById,
+  getNormalizedUrlsForSourceFile,
   incrementImportJob,
   insertImportJob,
   insertLinks,
   listImportJobs,
   updateImportJob,
 } from '../lib/db/queries'
-import { readFile, writeFile } from '../lib/files'
+import { getMtime, readFile, writeFile } from '../lib/files'
 import { resolveImportType } from '../lib/import/extractors'
 import {
   clearCachedUrls,
   extractLinks,
+  filterAgainstExisting,
   getCachedUrls,
   type ImportStrategy,
   type ImportType,
@@ -92,6 +95,10 @@ export const importRouter = router({
 
   parse: router({
     // Step 2a: extract + validate once, cache, transition to processing.
+    // For a stale-completed job (file changed since last parse), takes the
+    // re-parse branch: rejects type/strategy overrides, filters extracted
+    // URLs against rows already inserted for this source file, resets
+    // importedCount to 0, sets isReparse=true. See design.md D3 + D7.
     start: publicProcedure
       .input(
         z.object({
@@ -103,39 +110,93 @@ export const importRouter = router({
       .mutation(async ({ input }) => {
         const job = await getImportJobById(input.jobId)
         if (!job) throw new TRPCError({ code: 'NOT_FOUND', message: 'Job not found' })
-        if (job.status === 'completed') {
+
+        // Stale detection: read the file's current mtime once. This also
+        // doubles as the existence check (stat throws NOT_FOUND-equivalent
+        // if the file vanished — we let that propagate as a 500 below;
+        // existing delete-file flow already handles that case).
+        //
+        // No `fileMtime !== null` guard: per spec scenario "Re-parse a
+        // completed job whose file has changed", a legacy completed job
+        // (fileMtime NULL from pre-deploy) is treated as stale because
+        // any ISO string !== null. This is the one-time post-deploy path
+        // that re-inserts every URL (filterAgainstExisting returns empty
+        // for source_file = NULL rows); user runs deduplicate to collapse.
+        const currentMtime = await getMtime(job.sourceContent)
+        const isReparse = job.status === 'completed' && job.fileMtime !== currentMtime
+
+        if (job.status === 'completed' && !isReparse) {
           throw new TRPCError({
             code: 'CONFLICT',
-            message: 'Job already completed; delete the file/job and re-import to re-parse',
+            message: 'File unchanged since last parse; nothing to do',
           })
         }
 
+        // Type / strategy override handling:
+        //  - First-parse (pending/processing): allowed, mirrors existing spec.
+        //  - Re-parse (completed+stale): forbidden. Changing strategy would
+        //    compute normalizedUrl differently and break the diff filter;
+        //    changing type would route through a different extractor.
+        if (isReparse) {
+          if (
+            (input.type !== undefined && input.type !== job.type) ||
+            (input.strategy !== undefined && input.strategy !== job.strategy)
+          ) {
+            throw new TRPCError({
+              code: 'BAD_REQUEST',
+              message:
+                'Re-parse must reuse the original type and strategy; delete the job and re-import to switch',
+            })
+          }
+        }
         const nextType: ImportType = input.type ?? job.type
         const nextStrategy: ImportStrategy = input.strategy ?? job.strategy
-        if (nextType !== job.type || nextStrategy !== job.strategy) {
-          await updateImportJob(input.jobId, { type: nextType, strategy: nextStrategy })
-        }
 
         const content = await readFile(job.sourceContent)
         const { links, detectedFormat } = extractLinks(content, nextType, job.sourceContent)
         const { valid, invalid } = validateImportLinks(links)
+
+        // Compute the cache. For re-parse, drop URLs already inserted for
+        // THIS source file (matched by normalizedUrl under nextStrategy).
+        // For first-parse, no filter — preserves byte-identical extraction
+        // order required by the "Resumable parsing after cache loss" spec.
+        let cacheValid = valid
+        if (isReparse) {
+          const existing = await getNormalizedUrlsForSourceFile(job.sourceContent)
+          cacheValid = filterAgainstExisting(valid, existing, nextStrategy)
+        }
+
         setCachedUrls(input.jobId, {
-          valid,
+          valid: cacheValid,
           invalid,
-          total: valid.length,
+          total: cacheValid.length,
           detectedFormat,
         })
 
+        // Atomic job transition. For re-parse: reset importedCount to 0 so
+        // the [0, batchSize) slice from parse.batch actually inserts rows
+        // (see design.md D7 / review Bug A). For first-parse: capture
+        // fileMtime + isReparse=false in the same update.
         await updateImportJob(input.jobId, {
           status: 'processing',
           errorCount: invalid.length,
+          fileMtime: currentMtime,
+          isReparse,
+          ...(isReparse ? { importedCount: 0 } : {}),
+          ...(nextType !== job.type || nextStrategy !== job.strategy
+            ? {
+                type: nextType,
+                strategy: nextStrategy,
+              }
+            : {}),
         })
 
         return {
           jobId: input.jobId,
-          totalValid: valid.length,
+          totalValid: cacheValid.length,
           invalidCount: invalid.length,
           detectedFormat,
+          isReparse,
         }
       }),
 
@@ -169,26 +230,52 @@ export const importRouter = router({
           }
 
           // Self-heal: rebuild the cache if missing (e.g. after restart).
+          // The reconstructed cache MUST match the original cache shape:
+          //  - job.isReparse === false → byte-identical full extraction,
+          //    no filter. Required by the "Resumable parsing after cache
+          //    loss" spec.
+          //  - job.isReparse === true → re-apply filterAgainstExisting so
+          //    rows inserted by prior batches of THIS re-parse drop out of
+          //    the reconstructed cache, and the [importedCount, +batchSize)
+          //    slice stays valid against the diff.
+          // No row-count inference — the persisted flag is the single source
+          // of truth. See design.md D7.
           let cached = getCachedUrls(input.jobId)
           if (!cached) {
             const content = await readFile(job.sourceContent)
             const { links, detectedFormat } = extractLinks(content, job.type, job.sourceContent)
             const { valid, invalid } = validateImportLinks(links)
-            cached = { valid, invalid, total: valid.length, detectedFormat }
+            const cacheValid = job.isReparse
+              ? filterAgainstExisting(
+                  valid,
+                  await getNormalizedUrlsForSourceFile(job.sourceContent),
+                  job.strategy,
+                )
+              : valid
+            cached = { valid: cacheValid, invalid, total: cacheValid.length, detectedFormat }
             setCachedUrls(input.jobId, cached)
           }
 
           const start = job.importedCount
           const end = Math.min(start + input.batchSize, cached.total)
           if (end <= start) {
-            // Nothing left; finalize.
+            // Nothing left; finalize. On re-parse completion, snap
+            // importedCount to the cumulative count for this source file
+            // (e.g. 502 = 500 original + 2 diff) so SourcesTab's "X links"
+            // indicator reflects the total rows for this file, not just the
+            // diff size. First-parse: no snap needed; importedCount already
+            // equals the row count.
+            const finalImportedCount = job.isReparse
+              ? await countLinksForSourceFile(job.sourceContent)
+              : start
             await updateImportJob(input.jobId, {
               status: 'completed',
               completedAt: new Date().toISOString(),
+              ...(job.isReparse ? { importedCount: finalImportedCount } : {}),
             })
             clearCachedUrls(input.jobId)
             return {
-              importedCount: start,
+              importedCount: finalImportedCount,
               totalValid: cached.total,
               errorCount: job.errorCount,
               done: true,
@@ -198,22 +285,24 @@ export const importRouter = router({
 
           const records = cached.valid
             .slice(start, end)
-            .map((link, i) => prepareUrlRecord(link, job.strategy, job.type, start + i))
+            .map((link, i) => prepareUrlRecord(link, job.strategy, job.type, start + i, job.sourceContent))
 
           if (records.length > 0) await insertLinks(records)
           await incrementImportJob(input.jobId, records.length, 0)
 
           const done = end >= cached.total
           if (done) {
+            const finalImportedCount = job.isReparse ? await countLinksForSourceFile(job.sourceContent) : end
             await updateImportJob(input.jobId, {
               status: 'completed',
               completedAt: new Date().toISOString(),
+              ...(job.isReparse ? { importedCount: finalImportedCount } : {}),
             })
             clearCachedUrls(input.jobId)
           }
 
           return {
-            importedCount: end,
+            importedCount: done && job.isReparse ? await countLinksForSourceFile(job.sourceContent) : end,
             totalValid: cached.total,
             errorCount: job.errorCount,
             done,
@@ -233,6 +322,10 @@ export const importRouter = router({
       status: j.status,
       importedCount: j.importedCount,
       errorCount: j.errorCount,
+      // ISO 8601 file mtime captured at parse.start. UI computes staleness
+      // as `file.modifiedAt !== job.fileMtime` to surface the Re-parse
+      // action without a server stat() round-trip. NULL until first parse.
+      fileMtime: j.fileMtime,
       createdAt: j.createdAt,
     }))
   }),
@@ -249,6 +342,7 @@ export const importRouter = router({
       status: j.status,
       importedCount: j.importedCount,
       errorCount: j.errorCount,
+      fileMtime: j.fileMtime,
       createdAt: j.createdAt,
     }
   }),

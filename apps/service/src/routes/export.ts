@@ -4,12 +4,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { getImportJobByFilename } from '../lib/db/queries'
 import { EXPORTS_DIR, readFile, writeExportFile } from '../lib/files'
-import {
-  detectFormat,
-  extractLinks,
-  type ImportType,
-  resolveImportType,
-} from '../lib/import/extractors'
+import { detectFormat, extractLinks, type ImportType, resolveImportType } from '../lib/import/extractors'
 import type { Link, LinkFormat } from '../lib/url/extract'
 import { splitLines } from '../lib/url/extract'
 import { publicProcedure, router } from '../trpc'

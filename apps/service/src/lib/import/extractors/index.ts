@@ -36,11 +36,7 @@ const FALLBACK_FORMAT: Record<ImportType, LinkFormat> = {
 
 const SNIFF_LINE_COUNT = 10
 
-export function buildDetectContext(
-  type: ImportType,
-  content: string,
-  filename?: string,
-): DetectContext {
+export function buildDetectContext(type: ImportType, content: string, filename?: string): DetectContext {
   const extension = filename ? lowerExtension(filename) : undefined
   const firstLines: string[] = []
   for (const line of splitLines(content)) {

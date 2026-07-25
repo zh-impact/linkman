@@ -1,15 +1,4 @@
-import {
-  Alert,
-  Badge,
-  Box,
-  Button,
-  Card,
-  Group,
-  ScrollArea,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core'
+import { Alert, Badge, Box, Button, Card, Group, ScrollArea, Stack, Text, Title } from '@mantine/core'
 import { useCallback, useEffect, useState } from 'react'
 import { trpc } from '../../utils/trpc-client'
 import type { useConfirm } from '../../utils/use-confirm'
@@ -83,13 +72,7 @@ function SubCard({
             <Button size="xs" variant="default" onClick={onDryRun} loading={loading}>
               Dry-run
             </Button>
-            <Button
-              size="xs"
-              color="red"
-              onClick={onExecute}
-              disabled={!canExecute}
-              loading={running}
-            >
+            <Button size="xs" color="red" onClick={onExecute} disabled={!canExecute} loading={running}>
               Execute
             </Button>
           </Group>
@@ -263,9 +246,7 @@ export function LinksPruneSection({
                 ) : (
                   <Badge
                     variant="filled"
-                    color={
-                      results['by-domain']?.count && results['by-domain'].count > 0 ? 'red' : 'gray'
-                    }
+                    color={results['by-domain']?.count && results['by-domain'].count > 0 ? 'red' : 'gray'}
                   >
                     {results['by-domain']?.count ?? 0}
                   </Badge>

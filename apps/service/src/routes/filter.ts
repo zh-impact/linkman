@@ -170,10 +170,7 @@ export const filterRouter = router({
             batchGroups.push(...domainGroups)
           }
 
-          const totalSimilar = batchGroups.reduce(
-            (sum, g) => sum + Math.max(0, g.linkIds.length - 1),
-            0,
-          )
+          const totalSimilar = batchGroups.reduce((sum, g) => sum + Math.max(0, g.linkIds.length - 1), 0)
 
           return {
             groupCount: batchGroups.length,

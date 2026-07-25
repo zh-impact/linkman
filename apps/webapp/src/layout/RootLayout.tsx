@@ -1,12 +1,4 @@
-import {
-  AppShell,
-  Burger,
-  Container,
-  Group,
-  MantineProvider,
-  Text,
-  UnstyledButton,
-} from '@mantine/core'
+import { AppShell, Burger, Container, Group, MantineProvider, Text, UnstyledButton } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { NavLink, Outlet } from 'react-router'
 import classes from './RootLayout.module.css'
@@ -66,8 +58,8 @@ export function RootLayout() {
         </AppShell.Header>
 
         <AppShell.Navbar p="md">
-          Navbar is collapsed on mobile at sm breakpoint. At that point it is no longer offset by
-          padding in the main element and it takes the full width of the screen when opened.
+          Navbar is collapsed on mobile at sm breakpoint. At that point it is no longer offset by padding in
+          the main element and it takes the full width of the screen when opened.
         </AppShell.Navbar>
 
         <AppShell.Main>

@@ -45,15 +45,7 @@ import { publicProcedure, router } from '../trpc'
 const TOKEN_TTL_MS = 5 * 60 * 1000
 const TOKEN_SWEEP_MS = 60 * 1000
 
-const pruneKindSchema = z.enum([
-  'duplicate',
-  'internal',
-  'by-domain',
-  'all',
-  'database',
-  'files',
-  'audit',
-])
+const pruneKindSchema = z.enum(['duplicate', 'internal', 'by-domain', 'all', 'database', 'files', 'audit'])
 type PruneKind = z.infer<typeof pruneKindSchema>
 
 const pruneParamsSchema = z.object({ domains: z.array(z.string()) }).optional()
@@ -77,11 +69,7 @@ function issueToken(kind: PruneKind, params: z.infer<typeof pruneParamsSchema>):
   return token
 }
 
-function consumeToken(
-  token: string,
-  kind: PruneKind,
-  params: z.infer<typeof pruneParamsSchema>,
-): boolean {
+function consumeToken(token: string, kind: PruneKind, params: z.infer<typeof pruneParamsSchema>): boolean {
   const entry = tokens.get(token)
   if (!entry) return false
   if (entry.expiresAt < Date.now()) {
@@ -234,13 +222,12 @@ export const pruneRouter = router({
         }
 
         case 'audit': {
-          const [operationCount, snapshotCount, operationsSample, snapshotsSample] =
-            await Promise.all([
-              getOperationsCount(),
-              countAllSnapshots(),
-              sampleOperations(),
-              sampleSnapshots(),
-            ])
+          const [operationCount, snapshotCount, operationsSample, snapshotsSample] = await Promise.all([
+            getOperationsCount(),
+            countAllSnapshots(),
+            sampleOperations(),
+            sampleSnapshots(),
+          ])
           return {
             kind,
             confirmToken: issueToken(kind, params),

@@ -14,6 +14,11 @@ export const linksTable = sqliteTable(
     urlHash: text('url_hash'),
     title: text('title'),
     source: text('source', { enum: ['TXT', 'JSON'] }).notNull(),
+    // Source filename (import_jobs.source_content) the link was parsed from.
+    // NULL for legacy rows written before this column existed (no backfill —
+    // info didn't exist). Re-parse uses this to compute "URLs already inserted
+    // from THIS file" via an index seek on idx_links_source_file.
+    sourceFile: text('source_file'),
     sourceOrder: integer('source_order').notNull(),
     status: text('status', {
       enum: [
@@ -53,6 +58,9 @@ export const linksTable = sqliteTable(
     index('idx_links_url_path').on(table.urlPath),
     index('idx_links_url_query').on(table.urlQuery),
     index('idx_links_url_hash').on(table.urlHash),
+    // Index on source_file so re-parse's `WHERE source_file = ?` uses an index
+    // seek rather than a full table scan. Mirrors idx_links_domain pattern.
+    index('idx_links_source_file').on(table.sourceFile),
   ],
 )
 
@@ -99,6 +107,16 @@ export const importJobs = sqliteTable(
     importedCount: integer('imported_count').notNull().default(0),
     duplicateCount: integer('duplicate_count').notNull().default(0),
     errorCount: integer('error_count').notNull().default(0),
+    // File mtime (ISO 8601) captured at parse.start. UI computes staleness as
+    // `file.modifiedAt !== job.fileMtime` to surface a Re-parse action without
+    // a server stat() round-trip. NULL until first parse runs.
+    fileMtime: text('file_mtime'),
+    // True iff the in-flight parse is a re-parse. Set at parse.start when
+    // taking the re-parse branch (job was `completed` and file mtime changed).
+    // parse.batch self-heal consults this flag to decide whether to re-apply
+    // the source-file-scoped diff filter on cache reconstruction — single
+    // source of truth, no inference from row counts. See design.md D7.
+    isReparse: integer('is_reparse', { mode: 'boolean' }).notNull().default(false),
     createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
     completedAt: text('completed_at'),
   },

@@ -395,6 +395,36 @@ export async function getImportJobByFilename(filename: string) {
 }
 
 /**
+ * Return the set of `normalizedUrl` values already inserted for a given source
+ * file. Used by re-parse to filter out URLs already in the DB so only the diff
+ * is cached + inserted. Backed by `idx_links_source_file` (index seek, not a
+ * table scan).
+ */
+export async function getNormalizedUrlsForSourceFile(sourceFile: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ normalizedUrl: linksTable.normalizedUrl })
+    .from(linksTable)
+    .where(eq(linksTable.sourceFile, sourceFile))
+    .all()
+  return new Set(rows.map((r) => r.normalizedUrl))
+}
+
+/**
+ * Cumulative count of link rows attributed to a source file. Used at re-parse
+ * completion to snap `import_jobs.importedCount` to the total (e.g. 502 = 500
+ * original + 2 diff) so the SourcesTab "X links" indicator reflects reality
+ * instead of just the most recent diff size.
+ */
+export async function countLinksForSourceFile(sourceFile: string): Promise<number> {
+  const row = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(linksTable)
+    .where(eq(linksTable.sourceFile, sourceFile))
+    .get()
+  return row?.count ?? 0
+}
+
+/**
  * Atomically increment job counters. Safe under concurrent parse.batch calls
  * because SQLite serializes writes and the increment is a single statement.
  */

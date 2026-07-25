@@ -81,9 +81,7 @@ export async function detectEditDistanceInDomain(
  * Build domain buckets for edit-distance pagination.
  * Returns domains sorted by size ascending (small domains first for quick initial response).
  */
-export function buildDomainBuckets(
-  links: LinkLike[],
-): Array<{ domain: string; links: LinkLike[] }> {
+export function buildDomainBuckets(links: LinkLike[]): Array<{ domain: string; links: LinkLike[] }> {
   const domainMap = new Map<string, LinkLike[]>()
   for (const link of links) {
     const bucket = domainMap.get(link.domain)

@@ -18,7 +18,7 @@ export const DEFAULT_NORMALIZE_CONFIG: NormalizeConfig = {
   removeFragment: true,
 }
 
-const SMART_NORMALIZE_CONFIG: NormalizeConfig = {
+export const SMART_NORMALIZE_CONFIG: NormalizeConfig = {
   forceHttps: false,
   removeWww: true,
   removeTrailingSlash: true,
@@ -48,12 +48,40 @@ export function validateImportLinks(links: Link[]): { valid: Link[]; invalid: st
   return { valid, invalid }
 }
 
+/**
+ * Drop any link whose `normalizedUrl` (under the same strategy that
+ * `prepareUrlRecord` would compute) is already in `existing`. Used by re-parse
+ * to compute the diff cache: only URLs new to this source file make it
+ * through, so subsequent `parse.batch` calls insert only the diff.
+ *
+ * Strategy must match the job's stored strategy — the caller is responsible
+ * for rejecting strategy overrides on re-parse (see design.md D3 / R6). A
+ * mismatch would silently re-introduce duplicates because the same original URL
+ * normalizes to different strings under different strategies.
+ */
+export function filterAgainstExisting(
+  links: Link[],
+  existing: Set<string>,
+  strategy: ImportStrategy,
+): Link[] {
+  return links.filter((link) => {
+    const normalizedUrl =
+      strategy === 'strict'
+        ? link.url
+        : strategy === 'normalized'
+          ? normalizeUrl(link.url, DEFAULT_NORMALIZE_CONFIG)
+          : normalizeUrl(link.url, SMART_NORMALIZE_CONFIG)
+    return !existing.has(normalizedUrl)
+  })
+}
+
 /** Build a single link record for insertion. */
 export function prepareUrlRecord(
   link: Link,
   strategy: ImportStrategy,
   sourceType: ImportType,
   order: number,
+  sourceFile?: string,
 ): typeof linksTable.$inferInsert {
   const originalUrl = link.url
   const normalizedUrl =
@@ -94,6 +122,7 @@ export function prepareUrlRecord(
     urlHash,
     title: link.title ?? '',
     source: sourceType,
+    sourceFile,
     sourceOrder: order,
     status: 'imported',
     tags: '[]',

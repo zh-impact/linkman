@@ -13,10 +13,7 @@ export const bookmarksHtmlExtractor: Extractor = {
   detect: (ctx) => {
     if (ctx.type !== 'TXT') return false
     if (ctx.content.toLowerCase().includes('netscape-bookmark')) return true
-    return (
-      ctx.firstLines.some((l) => /<DL>/i.test(l)) &&
-      ctx.firstLines.some((l) => /<A\s+HREF=/i.test(l))
-    )
+    return ctx.firstLines.some((l) => /<DL>/i.test(l)) && ctx.firstLines.some((l) => /<A\s+HREF=/i.test(l))
   },
   extract: (content: string): Link[] => parseBookmarksHtml(content),
 }

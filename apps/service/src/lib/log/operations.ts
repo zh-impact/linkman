@@ -102,10 +102,7 @@ export function diffLinks(
  * Log an operation after it has completed.
  * Creates an Operation record in the database and optionally creates a full snapshot.
  */
-export async function logOperation(
-  opts: LogOperationOptions,
-  beforeSnapshotHash: string,
-): Promise<string> {
+export async function logOperation(opts: LogOperationOptions, beforeSnapshotHash: string): Promise<string> {
   const afterSnapshot = await generateSnapshotHash()
 
   const operationId = uuidv4()

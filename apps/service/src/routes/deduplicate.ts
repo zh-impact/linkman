@@ -1,9 +1,5 @@
 import { z } from 'zod'
-import {
-  type AnalysisLink,
-  getActiveLinksForAnalysis,
-  updateLinksStatusByIds,
-} from '../lib/db/queries'
+import { type AnalysisLink, getActiveLinksForAnalysis, updateLinksStatusByIds } from '../lib/db/queries'
 import { logOperation } from '../lib/log'
 import { normalizeUrl } from '../lib/url/normalize'
 import { publicProcedure, router } from '../trpc'

@@ -111,13 +111,7 @@ export function AuditPruneSection({
         <Button size="xs" variant="default" onClick={fetchDryRun} loading={loading}>
           Dry-run
         </Button>
-        <Button
-          size="xs"
-          color="red"
-          onClick={handleExecute}
-          disabled={!canExecute}
-          loading={running}
-        >
+        <Button size="xs" color="red" onClick={handleExecute} disabled={!canExecute} loading={running}>
           Execute
         </Button>
       </Group>
