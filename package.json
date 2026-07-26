@@ -10,7 +10,7 @@
     "dev:frontend": "pnpm --filter webapp dev",
     "dev": "concurrently \"pnpm dev:backend\" \"pnpm dev:frontend\"",
     "format": "biome format --write",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "pnpm --filter service test",
     "knip": "knip"
   },
   "devDependencies": {
